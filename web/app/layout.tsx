@@ -1,0 +1,20 @@
+import type { Metadata } from "next";
+import "./styles.css";
+
+export const metadata: Metadata = {
+  title: "Commerce POS",
+  description: "Commerce and point-of-sale platform"
+};
+
+export default function RootLayout({
+  children
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+
