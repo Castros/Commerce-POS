@@ -5,6 +5,8 @@ import pinoHttp from "pino-http";
 
 import { pool } from "./db/client.js";
 import { logger } from "./logger.js";
+import { requestIdMiddleware } from "./shared/http/requestId.js";
+import { apiRouter } from "./routes.js";
 
 export function createApp() {
   const app = express();
@@ -22,12 +24,15 @@ export function createApp() {
           return;
         }
 
-        callback(new Error("CORS origin not allowed"));
+        const err = new Error("CORS origin not allowed");
+        err.statusCode = 403;
+        callback(err);
       },
       credentials: true
     })
   );
   app.use(express.json({ limit: "1mb" }));
+  app.use(requestIdMiddleware);
   app.use(pinoHttp({ logger }));
 
   app.get("/health", (_req, res) => {
@@ -48,9 +53,19 @@ export function createApp() {
     });
   });
 
+  app.use("/v1", apiRouter);
+
   app.use((err, req, res, _next) => {
-    req.log.error({ err }, "Unhandled request error");
-    res.status(500).json({ error: "Internal server error" });
+    const status = err.statusCode || (err.name === "ZodError" ? 400 : 500);
+    if (status >= 500 && req.log) {
+      req.log.error({ err }, "Unhandled request error");
+    } else if (status >= 500) {
+      logger.error({ err }, "Unhandled request error");
+    }
+
+    res.status(status).json({
+      error: status >= 500 ? "Internal server error" : err.message
+    });
   });
 
   return app;

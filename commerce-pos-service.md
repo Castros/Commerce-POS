@@ -2,9 +2,13 @@
 
 ## Status
 
-Planned as a separate product/service. Do not continue expanding the existing `cafeteria_*` module as the long-term POS architecture.
+Now scaffolded as the separate Commerce POS product in this repository. Do not continue
+expanding the Student Educational app's existing `cafeteria_*` module as the long-term
+POS architecture.
 
-The current app already has basic cafeteria tables and routes for the school pilot. Those should be treated as legacy/internal pilot support until the new Commerce/POS product exists.
+The Student Educational app still has basic cafeteria tables and routes for legacy
+pilot support. New wallet balances and cafeteria purchase history should come from
+Commerce POS through the integration API.
 
 ## Why This Should Be Separate
 
@@ -20,26 +24,11 @@ The cafeteria idea has grown beyond a school lunch feature. The target product n
 
 That is a different product surface from the spelling/phonics learning app. Keeping it separate avoids mixing education workflows with retail/POS workflows and makes it possible to sell the POS independently.
 
-## Recommended Repo Strategy
+## Repository Strategy
 
-Create a separate repository for the Commerce/POS product.
-
-Suggested repo names:
-
-```text
-commerce-pos
-school-commerce-pos
-francommerce-pos
-pos-wallet-platform
-```
-
-Recommended first choice:
-
-```text
-commerce-pos
-```
-
-The spelling app should integrate with it through APIs instead of owning the POS domain directly.
+The Commerce/POS product now lives in the separate `commerce_pos` repository. The
+Student Educational app integrates through APIs instead of owning the POS domain
+directly.
 
 ## Product Boundary
 
@@ -419,12 +408,11 @@ Example route groups:
 /reports
 ```
 
-School integration routes:
+Current school integration routes:
 
 ```text
-/integrations/spelling-app/schools/:schoolId/sync
-/integrations/spelling-app/students/:studentId/customer
-/integrations/spelling-app/parents/:parentId/customers
+POST /v1/integrations/student-app/students
+GET  /v1/integrations/student-app/students/:externalStudentId/cafeteria
 ```
 
 ## Integration With Spelling App
@@ -444,10 +432,19 @@ webhooks for balance/order updates
 Parent visibility in the Spelling App can be powered by Commerce/POS APIs:
 
 ```text
-GET /commerce/customers/:studentId/wallet
-GET /commerce/customers/:studentId/orders
-GET /commerce/marketplace?schoolId=...
+GET /v1/integrations/student-app/students/:externalStudentId/cafeteria
 ```
+
+The current Student app implementation calls Commerce POS from:
+
+```text
+spelling-app/api/src/services/commercePos.js
+spelling-app/api/src/routes/student.js
+spelling-app/api/src/routes/parents.js
+```
+
+It falls back to legacy `cafeteria_accounts` and `cafeteria_transactions` only when
+Commerce POS is unavailable.
 
 ## Migration From Existing Cafeteria Module
 
@@ -482,31 +479,14 @@ Migration path:
 
 ## Recommended Next Step
 
-Create the separate Commerce/POS repository and scaffold:
+The first vertical slice and Student app bridge are in place. The next work is to
+harden the integration for production:
 
 ```text
-api
-web
-docker-compose.yml
-docs
+service-token authentication
+real school/student mapping configuration
+inventory movements
+cash drawer sessions
+refunds and voids
+production deployment and backup docs
 ```
-
-Before implementation, use the architecture and security baseline in:
-
-```text
-docs/architecture-security.md
-```
-
-Then implement the first vertical slice:
-
-```text
-organization
-store
-product
-wallet account
-order
-wallet payment
-receipt response
-```
-
-Only after that should the Spelling App integrate with it.

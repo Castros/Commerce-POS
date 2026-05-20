@@ -1,15 +1,27 @@
 :root {
   color-scheme: light;
-  --bg: #f5f7fa;
-  --panel: #ffffff;
+  --bg: #eef2f6;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --surface-muted: #f1f5f9;
   --text: #172033;
-  --muted: #5f6b7a;
-  --line: #d9e0e8;
-  --accent: #0f766e;
+  --muted: #64748b;
+  --line: #d8e0ea;
+  --primary: #0f766e;
+  --primary-dark: #0b5f59;
+  --blue: #2563eb;
+  --green: #15803d;
+  --amber: #b45309;
+  --red: #b42318;
+  --shadow: 0 16px 36px rgb(15 23 42 / 8%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
@@ -21,84 +33,1356 @@ body {
     sans-serif;
 }
 
-.shell {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 32px;
+button,
+input,
+select {
+  font: inherit;
 }
 
-.panel {
-  width: min(780px, 100%);
-  background: var(--panel);
+button {
+  min-height: 42px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 32px;
-  box-shadow: 0 20px 40px rgb(23 32 51 / 8%);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
 }
 
-.eyebrow {
-  margin: 0 0 10px;
-  color: var(--accent);
-  font-size: 0.78rem;
+button:hover,
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgb(15 118 110 / 22%);
+  outline-offset: 2px;
+}
+
+input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.appShell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  border-right: 1px solid var(--line);
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  margin-bottom: 22px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brandMark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.brand strong,
+.brand span {
+  display: block;
+}
+
+.brand span:not(.brandMark) {
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.navList {
+  display: grid;
+  gap: 6px;
+}
+
+.navList a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #cbd5e1;
+  text-decoration: none;
   font-weight: 700;
+}
+
+.navList a.active,
+.navList a:hover {
+  background: rgb(15 118 110 / 22%);
+  color: #ffffff;
+}
+
+.navIcon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 9%);
+  font-size: 0.78rem;
+}
+
+.navText {
+  display: grid;
+  gap: 2px;
+}
+
+.navText small {
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.workspace {
+  min-width: 0;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: auto minmax(260px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 72px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 92%);
+  backdrop-filter: blur(14px);
+}
+
+.selectors,
+.userMenu,
+.toolbar,
+.paymentMethods,
+.actionGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.selectors button,
+.userMenu button,
+.toolbar button,
+.paymentMethods button,
+.actionGrid button {
+  padding: 0 12px;
+}
+
+.sync {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: #dcfce7;
+  color: var(--green);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.globalSearch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.userMenu {
+  justify-content: flex-end;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.content {
+  display: grid;
+  gap: 22px;
+  padding: 22px;
+}
+
+.module {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.sectionHeader p {
+  margin: 0 0 4px;
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 900;
   letter-spacing: 0;
   text-transform: uppercase;
 }
 
-h1 {
+.sectionHeader h2,
+.chartPanel h3,
+.panelWide h3,
+.adminCard h3,
+.detailPanel h3 {
   margin: 0;
-  font-size: clamp(2rem, 5vw, 3.5rem);
-  line-height: 1;
   letter-spacing: 0;
 }
 
-.summary {
-  max-width: 620px;
-  margin: 18px 0 28px;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.6;
+.sectionHeader h2 {
+  font-size: 1.35rem;
 }
 
-.statusGrid {
+.sectionHeader > button,
+.primaryAction,
+.buttonLink.primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+  padding: 0 16px;
+}
+
+.sectionHeader > button:hover,
+.primaryAction:hover,
+.buttonLink.primary:hover {
+  background: var(--primary-dark);
+}
+
+.buttonLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.permissionStrip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.permissionStrip > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 12px;
+}
+
+.permissionStrip span,
+.permissionStrip small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.permissionStrip strong {
+  font-size: 1rem;
+}
+
+.metricTile,
+.adminCard,
+.chartPanel,
+.panelWide,
+.detailPanel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 16px;
+}
+
+.metricTile span,
+.metricTile small,
+.detailPanel > span,
+.customerStrip span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.metricTile strong {
+  display: block;
+  margin: 8px 0 2px;
+  font-size: 1.65rem;
+  letter-spacing: 0;
+}
+
+.dashboardGrid,
+.reportGrid,
+.adminGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  margin-top: 12px;
+}
+
+.activityList {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.registerGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+  gap: 14px;
+}
+
+.productPane,
+.cartPane {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--surface-soft);
+}
+
+.toolbar {
+  margin-bottom: 12px;
+}
+
+.toolbar input {
+  flex: 1 1 320px;
+}
+
+.reportFilters label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.reportFilters input,
+.reportFilters select {
+  min-width: 150px;
+}
+
+.categoryTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.categoryTabs button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.categoryTabs button.active {
+  border-color: var(--teal);
+  background: #ccfbf1;
+  color: #134e4a;
+}
+
+.productGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.productTile {
+  display: grid;
+  grid-template-rows: 112px auto auto;
+  gap: 10px;
+  align-content: start;
+  min-height: 232px;
+  padding: 10px;
+  text-align: left;
+  overflow: hidden;
+}
+
+.productTile span {
+  color: var(--muted);
+}
+
+.productTile:disabled .productImageFrame {
+  filter: grayscale(0.9);
+  opacity: 0.55;
+}
+
+.productImageFrame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 112px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.productImageFrame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.productImageFallback {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: #e0f2fe;
+  color: #075985 !important;
+  font-weight: 900;
+}
+
+.productTileText {
+  display: grid;
+  gap: 3px;
+}
+
+.productTileText strong {
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.productTileText small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.productTileMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.productTileMeta strong {
+  color: var(--text);
+}
+
+.productGrid > .emptyState {
+  grid-column: 1 / -1;
+}
+
+.badge {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.badge.success {
+  background: #dcfce7;
+  color: var(--green);
+}
+
+.badge.warning {
+  background: #fef3c7;
+  color: var(--amber);
+}
+
+.badge.danger {
+  background: #fee2e2;
+  color: var(--red);
+}
+
+.cartPane {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.fieldStack {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldStack span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.studentCard,
+.receiptBox,
+.linkStudentPanel {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.studentCard span,
+.receiptBox span,
+.linkStudentPanel span,
+.studentCard small,
+.receiptBox small,
+.linkStudentPanel small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.studentSearchResults {
+  display: grid;
+  gap: 6px;
+}
+
+.studentSearchResults button {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.studentSearchResults button span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.studentAccountList {
+  display: grid;
+  gap: 6px;
+}
+
+.studentAccountList > span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.studentAccountList button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  text-align: left;
+}
+
+.studentAccountList button.active {
+  border-color: var(--primary);
+  background: #ecfeff;
+}
+
+.studentAccountList small {
+  color: var(--muted);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.studentCard h3 {
   margin: 0;
 }
 
-.statusGrid div {
+.studentCard p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.studentCard strong,
+.receiptBox strong {
+  font-size: 1.55rem;
+}
+
+.studentCard .positiveBalance {
+  color: var(--green);
+}
+
+.studentCard .negativeBalance {
+  color: var(--red);
+}
+
+.balanceGrid,
+.studentAppStats,
+.walletSummary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.balanceGrid span,
+.studentAppStats span,
+.walletSummary span {
+  display: grid;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 16px;
+  padding: 10px;
+  background: var(--surface-soft);
+}
+
+.walletSummary {
+  grid-template-columns: 1fr;
+}
+
+.walletSummary span {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.dangerText {
+  color: var(--red);
+}
+
+.walletWarning {
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fef2f2;
+  color: var(--red);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.walletNote {
+  margin: 0;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f0fdf4;
+  color: var(--green);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.studentAppStats {
+  grid-template-columns: 1fr;
+}
+
+.studentAppStats span {
+  border-color: rgb(255 255 255 / 16%);
+  background: rgb(255 255 255 / 8%);
+}
+
+.studentAppStats span strong {
+  color: #ffffff;
+  font-size: 1.1rem;
+}
+
+.emptyState {
+  margin: 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.customerStrip,
+.cartLine,
+.totals span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customerStrip,
+.cartLine {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.cartLine span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.quantityStepper {
+  display: inline-grid;
+  grid-template-columns: 34px 32px 34px;
+  align-items: center;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.quantityStepper button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+}
+
+.totals {
+  display: grid;
+  gap: 8px;
+}
+
+.grandTotal {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  font-size: 1.25rem;
+}
+
+.paymentMethods {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.paymentMethods button {
+  min-width: 0;
+  min-height: 44px;
+  padding-inline: 8px;
+  white-space: normal;
+  line-height: 1.15;
+}
+
+.paymentMethods button.active,
+.paymentMethods button[aria-pressed="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgb(14 116 144 / 16%);
+}
+
+.primaryAction {
+  min-height: 52px;
+  font-size: 1rem;
+}
+
+.buttonHelp {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.buttonHelp.success {
+  color: var(--green);
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  background: var(--surface);
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+tr.active td {
+  background: #ecfdf5;
+}
+
+.inventoryPanel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(220px, 1fr) 140px minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 14px 0 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.inventoryPanel > div,
+.inventoryPanel label {
+  display: grid;
+  gap: 6px;
+}
+
+.inventoryPanel span,
+.inventoryPanel label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.inventoryPanel strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.inventoryPanel small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.cashDrawerGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.splitPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+}
+
+.productAdminGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 14px;
+  align-items: start;
+}
+
+.productEditor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: var(--surface-soft);
+}
+
+.productEditor > div:first-child,
+.productEditor label {
+  display: grid;
+  gap: 6px;
+}
+
+.productEditor span,
+.productEditor label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.productEditor strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.productEditor small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.productEditor textarea {
+  resize: vertical;
+}
+
+.toggleRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.toggleRow label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.productPreview {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.productPreview div {
+  display: grid;
+  place-items: center;
+  height: 128px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.productPreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.productPreview div > strong {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.detailPanel {
+  align-self: start;
+}
+
+.detailPanel p,
+.adminCard p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.receiptDetail {
+  display: grid;
+  gap: 12px;
+}
+
+.receiptHeader,
+.receiptLines > div,
+.receiptImpact {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.receiptHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.receiptHeader small,
+.receiptImpact span,
+.receiptImpact small,
+.receiptLines small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.receiptLines {
+  display: grid;
+  gap: 8px;
+}
+
+.receiptLines > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.receiptTotals {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.receiptImpact {
+  display: grid;
+  gap: 6px;
+}
+
+.receiptImpact > strong {
+  font-size: 1.35rem;
+}
+
+.receiptActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+dl {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 dt {
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-weight: 800;
 }
 
 dd {
-  margin: 8px 0 0;
-  font-size: 1.25rem;
-  font-weight: 700;
+  margin: 0;
+  font-weight: 800;
 }
 
-@media (max-width: 640px) {
-  .shell {
-    padding: 16px;
-    place-items: stretch;
+.reportGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chartPanel.full {
+  grid-column: 1 / -1;
+}
+
+.barChart {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  height: 180px;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.barChart span {
+  flex: 1;
+  border-radius: 8px 8px 0 0;
+  background: linear-gradient(180deg, var(--blue), var(--primary));
+}
+
+.compactBars {
+  height: 160px;
+}
+
+.reportStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
+}
+
+.reportStats div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.reportStats dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.adminGrid,
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.adminCard {
+  display: grid;
+  gap: 10px;
+}
+
+.adminCard button {
+  width: fit-content;
+  padding: 0 12px;
+}
+
+.settingsGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settingRow {
+  display: grid;
+  gap: 6px;
+  gap: 12px;
+  min-height: 94px;
+  padding: 14px;
+  text-align: left;
+}
+
+.settingRow span {
+  color: var(--primary);
+  font-size: 0.85rem;
+}
+
+.settingRow small,
+.panelCopy {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.studentPreviewGrid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.studentPhone {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+
+.studentPhoneTop,
+.walletHero {
+  display: grid;
+  gap: 4px;
+}
+
+.studentPhoneTop span,
+.walletHero span,
+.walletHero small {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.walletHero {
+  border-radius: 16px;
+  background: var(--primary);
+  padding: 18px;
+}
+
+.walletHero strong {
+  font-size: 2.2rem;
+}
+
+.studentPhone .fieldStack span {
+  color: #cbd5e1;
+}
+
+.transactionList {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transactionList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+}
+
+.transactionList li:last-child {
+  border-bottom: 0;
+}
+
+.transactionList span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+@media (max-width: 1180px) {
+  .appShell {
+    grid-template-columns: 88px minmax(0, 1fr);
   }
 
-  .panel {
-    padding: 24px;
+  .brand div,
+  .navText {
+    font-size: 0;
+    display: none;
   }
 
-  .statusGrid {
+  .navIcon {
+    font-size: 0.78rem;
+  }
+
+  .navList a {
+    justify-content: center;
+  }
+
+  .registerGrid,
+  .cashDrawerGrid,
+  .inventoryPanel,
+  .productAdminGrid,
+  .splitPanel,
+  .studentPreviewGrid {
     grid-template-columns: 1fr;
   }
+
+  .productGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .cartPane,
+  .detailPanel {
+    position: static;
+  }
+
+  .adminGrid,
+  .settingsGrid,
+  .metricGrid,
+  .permissionStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
+@media (max-width: 760px) {
+  .appShell {
+    display: block;
+    padding-bottom: 72px;
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 10;
+    height: auto;
+    padding: 8px;
+    border-right: 0;
+    border-top: 1px solid rgb(255 255 255 / 10%);
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .navList {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(58px, 1fr);
+    overflow-x: auto;
+  }
+
+  .navList a {
+    min-height: 54px;
+    padding: 0;
+  }
+
+  .topbar {
+    position: static;
+    grid-template-columns: 1fr;
+  }
+
+  .globalSearch {
+    grid-template-columns: 1fr;
+  }
+
+  .content {
+    padding: 14px;
+  }
+
+  .module {
+    padding: 14px;
+  }
+
+  .sectionHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metricGrid,
+  .dashboardGrid,
+  .productGrid,
+  .reportGrid,
+  .adminGrid,
+  .settingsGrid,
+  .paymentMethods,
+  .permissionStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .cartLine {
+    align-items: start;
+    flex-direction: column;
+  }
+}

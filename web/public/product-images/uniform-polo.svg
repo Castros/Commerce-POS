@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-labelledby="title">
+  <title id="title">Uniform polo shirt</title>
+  <rect width="240" height="180" rx="18" fill="#f8fafc"/>
+  <path d="M80 48l28-18h24l28 18 30 20-18 28-18-10v62H86V86L68 96 50 68z" fill="#0f766e" stroke="#115e59" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M108 31l12 20 12-20" fill="#ffffff" stroke="#ccfbf1" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="121" cy="68" r="4" fill="#ffffff"/>
+  <circle cx="121" cy="84" r="4" fill="#ffffff"/>
+</svg>

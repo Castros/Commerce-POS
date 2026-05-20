@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-labelledby="title">
+  <title id="title">Field trip ticket</title>
+  <rect width="240" height="180" rx="18" fill="#f0fdf4"/>
+  <path d="M48 62h144v24a16 16 0 000 32v24H48v-24a16 16 0 000-32z" fill="#bbf7d0" stroke="#16a34a" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M96 72v60" stroke="#16a34a" stroke-width="5" stroke-dasharray="8 8"/>
+  <path d="M120 82h44M120 104h34M120 126h44" stroke="#166534" stroke-width="6" stroke-linecap="round"/>
+</svg>

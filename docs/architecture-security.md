@@ -521,3 +521,11 @@ Show wallet balance
 - Add audit logging from the start.
 - Keep the Spelling App integration API-based.
 - Avoid microservices and Kubernetes during pilot.
+
+## Follow-Up Reviews
+
+The engineering software architecture and backend architecture agent findings are documented in:
+
+```text
+docs/agent-architecture-review.md
+```
