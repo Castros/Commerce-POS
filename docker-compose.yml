@@ -27,6 +27,7 @@ services:
       SPELLING_APP_SERVICE_TOKEN: ${SPELLING_APP_SERVICE_TOKEN:-}
       COMMERCE_API_TOKEN: ${COMMERCE_API_TOKEN:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100}
+      DISABLE_DEMO_SEED: ${DISABLE_DEMO_SEED:-false}
     ports:
       - "${API_PORT:-4100}:4100"
     extra_hosts:

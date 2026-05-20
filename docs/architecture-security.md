@@ -75,7 +75,7 @@ Avoid Kubernetes, service meshes, event buses, and multi-database complexity unt
 Add:
 
 - Separate production database
-- Read replica only if reports become expensive
+- Read replica or read-only follower for high-volume school-app balance lookups if read traffic grows
 - Background worker for webhooks, reports, exports, and retries
 - Redis only if needed for rate limiting, job queues, or short-lived locks
 - Central log aggregation
@@ -99,6 +99,8 @@ Do not split wallet/order/payment writes across services early. Money movement i
 
 Use Postgres as the source of truth. Keep all financial state changes inside database transactions.
 
+For the Student Educational app integration, keep writes on the primary database and treat wallet/balance reads as a separate read path. The parent-facing lookup endpoint can start on the primary during pilot, but if many schools or parents start polling the same balances and spending history, route that read traffic to a replica or read-only pool. The write path for sales, top-ups, refunds, and inventory updates should stay on the primary database.
+
 Required rules:
 
 - Use UUID primary keys.
@@ -113,7 +115,7 @@ Recommended money columns:
 
 ```sql
 amount_cents BIGINT NOT NULL
-currency TEXT NOT NULL DEFAULT 'USD'
+currency TEXT NOT NULL DEFAULT 'MXN'
 ```
 
 This is safer than `NUMERIC(10,2)` in application logic because it avoids rounding ambiguity.
@@ -279,6 +281,41 @@ Audit events should record:
 - User agent
 - Request ID
 - Timestamp
+
+For this product, treat the following as audited write paths by default:
+
+- wallet top-ups and wallet sales
+- paid sales and refunds
+- cash drawer open/close
+- supplier upserts
+- invoice creation and approval
+- inventory CSV import create/apply
+- receipt draft create/approve
+- stock adjustments and transfers
+
+Also emit a structured business log line for each completed transaction so Loki can
+capture operational detail without turning the database into the only incident source.
+Keep Loki labels low-cardinality only, such as service, application, environment, and
+component. Put request IDs, transaction IDs, staff IDs, item lists, and amounts in
+the JSON payload, not in labels.
+
+Transaction log classes:
+
+- sale
+- refund
+- top-up
+- drawer open/close
+- invoice receive/approve
+- inventory adjustment
+- inventory transfer
+- CSV import apply
+- receipt draft approve
+
+Recommended retention:
+
+- Stream JSON logs to Loki for search and alerting.
+- Archive compressed log files to S3 for longer retention.
+- Keep S3 private, encrypted, versioned, and lifecycle-managed.
 
 Audit required for:
 
