@@ -1,0 +1,83 @@
+name: commerce-pos
+region: nyc
+
+# DigitalOcean App Platform spec
+# Deploy with: doctl apps create --spec .do/app.yaml
+# Update with: doctl apps update $APP_ID --spec .do/app.yaml
+#
+# Required secrets set in DO dashboard (or via doctl):
+#   SESSION_SECRET       - long random string (openssl rand -hex 32)
+#   COMMERCE_API_TOKEN   - long random string for service-to-service auth
+#   SENTRY_DSN           - from sentry.io project settings (optional)
+#
+# After first deploy, add your domain in the DO App Platform console:
+#   api.fransolution.net  → api service
+#   pos.fransolution.net  → web service
+
+services:
+  - name: api
+    source_dir: api
+    dockerfile_path: Dockerfile
+    http_port: 4100
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 10
+      period_seconds: 30
+    envs:
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+      - key: NODE_ENV
+        value: production
+      - key: DISABLE_DEMO_SEED
+        value: "true"
+      - key: SESSION_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: COMMERCE_API_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: CORS_ORIGINS
+        value: https://pos.fransolution.net
+      - key: API_PORT
+        value: "4100"
+      - key: SENTRY_DSN
+        scope: RUN_TIME
+        type: SECRET
+
+  - name: web
+    source_dir: web
+    dockerfile_path: Dockerfile
+    http_port: 3100
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /
+      initial_delay_seconds: 15
+      period_seconds: 30
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: API_URL
+        value: ${api.PRIVATE_URL}
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    size: db-s-dev-database
+    num_nodes: 1
+
+jobs:
+  - name: migrate
+    kind: PRE_DEPLOY
+    source_dir: api
+    dockerfile_path: Dockerfile
+    run_command: node src/db/migrate.js
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      - key: DATABASE_URL
+        value: ${db.DATABASE_URL}
+      - key: NODE_ENV
+        value: production

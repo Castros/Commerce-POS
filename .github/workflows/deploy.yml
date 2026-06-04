@@ -1,0 +1,32 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    name: Verify before deploy
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy to DigitalOcean
+    runs-on: ubuntu-latest
+    needs: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Deploy app
+        run: doctl apps create --spec .do/app.yaml --no-wait || doctl apps update ${{ secrets.DIGITALOCEAN_APP_ID }} --spec .do/app.yaml --no-wait
+
+      - name: Trigger deployment
+        run: |
+          APP_ID=${{ secrets.DIGITALOCEAN_APP_ID }}
+          if [ -n "$APP_ID" ]; then
+            doctl apps create-deployment $APP_ID
+          fi
