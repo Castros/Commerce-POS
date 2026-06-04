@@ -8,6 +8,20 @@ import { pool } from "../src/db/client.js";
 let server;
 let baseUrl;
 
+function assertTestDatabase() {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) return;
+
+  const dbName = new URL(databaseUrl).pathname.replace(/^\//, "");
+  const explicitlyAllowed = process.env.ALLOW_TESTS_ON_NON_TEST_DB === "true";
+
+  if (!dbName.includes("test") && !explicitlyAllowed) {
+    throw new Error(
+      `Refusing to run API tests against non-test database "${dbName}". Set TEST_DATABASE_URL or ALLOW_TESTS_ON_NON_TEST_DB=true.`
+    );
+  }
+}
+
 function unique(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -90,6 +104,7 @@ async function openDrawer({ org, store, openingCashCents = 10000 }) {
 }
 
 before(async () => {
+  assertTestDatabase();
   process.env.NODE_ENV = "test";
   await runMigrations();
   const app = createApp();

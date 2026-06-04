@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
 
 import { pool } from "../../db/client.js";
+import { resolveBrowserSessionFromRequest } from "./browserAuth.js";
 import { forbidden, unauthorized } from "../http/errors.js";
 
 const rolePermissions = {
   platform_admin: ["*"],
+  super_admin: ["*"],
   organization_owner: ["*"],
   organization_admin: [
     "organizations:write",
@@ -13,14 +15,16 @@ const rolePermissions = {
     "customers:write",
     "wallets:write",
     "orders:write",
-    "reports:read"
+    "reports:read",
+    "credentials:write"
   ],
   store_manager: [
     "products:write",
     "customers:write",
     "wallets:write",
     "orders:write",
-    "reports:read"
+    "reports:read",
+    "credentials:write"
   ],
   cashier: ["customers:write", "wallets:topup", "orders:write"],
   accountant: ["wallets:write", "orders:read", "reports:read"],
@@ -34,7 +38,8 @@ const rolePermissions = {
     "wallets:write",
     "wallets:topup",
     "orders:write",
-    "reports:read"
+    "reports:read",
+    "credentials:write"
   ]
 };
 
@@ -100,6 +105,19 @@ function resolveDevActor(req) {
 
 export async function authenticateRequest(req, _res, next) {
   try {
+    const browserSession = await resolveBrowserSessionFromRequest(req);
+    if (browserSession) {
+      req.actor = {
+        actorUserId: browserSession.userId,
+        actorService: null,
+        role: browserSession.role,
+        organizationId: browserSession.organizationId,
+        authMode: browserSession.authMode
+      };
+      next();
+      return;
+    }
+
     const authorization = req.get("authorization") || "";
     const match = authorization.match(/^Bearer\s+(.+)$/i);
 
@@ -150,4 +168,29 @@ export function getActor(req) {
     organizationId: null,
     authMode: "unknown"
   };
+}
+
+const PLATFORM_ROLES = new Set(["platform_admin", "super_admin", "service"]);
+const STORE_UNRESTRICTED_ROLES = new Set([
+  "platform_admin", "super_admin", "organization_owner", "organization_admin", "service"
+]);
+
+export function authorizeTenant(actor, organizationId) {
+  if (!actor) throw forbidden("Access denied");
+  if (PLATFORM_ROLES.has(actor.role)) return;
+  if (!actor.organizationId || actor.organizationId !== organizationId) {
+    throw forbidden("Access denied");
+  }
+}
+
+export async function authorizeStore(actor, organizationId, storeId) {
+  authorizeTenant(actor, organizationId);
+  if (!storeId || STORE_UNRESTRICTED_ROLES.has(actor.role)) return;
+  if (!actor.actorUserId) return;
+  const result = await pool.query(
+    `SELECT 1 FROM commerce_user_store_assignments
+     WHERE organization_id = $1 AND user_id = $2 AND store_id = $3`,
+    [organizationId, actor.actorUserId, storeId]
+  );
+  if (result.rowCount === 0) throw forbidden("Not assigned to this store");
 }

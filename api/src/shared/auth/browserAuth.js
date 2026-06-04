@@ -6,7 +6,8 @@ import { pool } from "../../db/client.js";
 const pbkdf2Async = promisify(crypto.pbkdf2);
 
 export const BROWSER_SESSION_COOKIE = "commerce_pos_session";
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+export const SESSION_TTL_SECONDS = 12 * 60 * 60;
+const SESSION_TTL_MS = SESSION_TTL_SECONDS * 1000;
 const PIN_ITERATIONS = 120000;
 const PIN_KEY_LENGTH = 32;
 const PIN_DIGEST = "sha256";
@@ -67,7 +68,7 @@ function cookieSuffix(options = {}) {
 
 export function serializeBrowserSessionCookie(token, options = {}) {
   const parts = [`${BROWSER_SESSION_COOKIE}=${encodeURIComponent(token)}`];
-  parts.push(...cookieSuffix({ path: "/", httpOnly: true, sameSite: "Lax", ...options }));
+  parts.push(...cookieSuffix({ path: "/", httpOnly: true, sameSite: "Strict", ...options }));
   return parts.join("; ");
 }
 

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
-import { requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, parseZod } from "../../shared/http/errors.js";
 
 export const reportsRouter = Router();
@@ -73,6 +73,7 @@ reportsRouter.get(
   requirePermission("reports:read"),
   asyncHandler(async (req, res) => {
     const query = parseZod(summaryQuerySchema, req.query);
+    authorizeTenant(req.actor, query.organizationId);
     const orderFilter = buildOrderFilter(query);
     const drawerFilter = buildDrawerFilter(query);
 

@@ -1,319 +1,454 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
-import { apiGet, apiPost } from "../lib/api";
-import { formatMoney } from "../lib/format";
-import type { DemoSchoolData, Wallet } from "../lib/demoTypes";
-import { loadCurrentOrganization, loadCurrentStore } from "../lib/organizationContext";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
+import { loadCurrentOrganization } from "../lib/organizationContext";
+import type { Store } from "../lib/demoTypes";
 
-type Customer = {
+type StaffMember = {
   id: string;
   organizationId: string;
-  externalStudentId: string | null;
-  externalParentId: string | null;
-  externalId: string | null;
   name: string | null;
   email: string | null;
-  phone: string | null;
+  role: string;
+  active: boolean;
+  pinLast4: string | null;
+  pinSetAt: string | null;
+  createdAt: string;
+  storeIds: string[];
+};
+
+type FormState = {
+  name: string;
+  email: string;
+  role: string;
+  pin: string;
+  storeIds: string[];
   active: boolean;
 };
 
-type StudentCredential = {
-  id: string;
-  organizationId: string;
-  customerId: string;
-  walletAccountId: string | null;
-  credentialType: string;
-  credentialLabel: string | null;
-  active: boolean;
-  issuedAt: string;
-  revokedAt: string | null;
-  lastUsedAt: string | null;
-  metadata: Record<string, unknown>;
-  customerName: string;
-  externalStudentId: string | null;
-  externalId: string | null;
-  walletBalanceCents: number | null;
-  walletCreditLimitCents: number | null;
+const ROLES = [
+  { value: "organization_admin", label: "Organization Admin" },
+  { value: "store_manager", label: "Store Manager" },
+  { value: "cashier", label: "Cashier" },
+  { value: "accountant", label: "Accountant" }
+];
+
+const ROLE_COLORS: Record<string, string> = {
+  organization_admin: "primary",
+  store_manager: "warning",
+  cashier: "success",
+  accountant: "muted"
 };
 
-type IssueResponse = {
-  credential: StudentCredential;
-  credentialToken: string;
-  customer: Customer;
-  wallet: Wallet;
-};
+function blankForm(): FormState {
+  return { name: "", email: "", role: "cashier", pin: "", storeIds: [], active: true };
+}
 
-const credentialTypes = [
-  { value: "nfc_wristband", label: "NFC wristband" },
-  { value: "nfc_card", label: "NFC card" },
-  { value: "barcode", label: "Barcode fallback" },
-  { value: "qr_code", label: "QR fallback" }
-] as const;
+function staffToForm(s: StaffMember): FormState {
+  return {
+    name: s.name || "",
+    email: s.email || "",
+    role: s.role,
+    pin: "",
+    storeIds: s.storeIds,
+    active: s.active
+  };
+}
 
-export function StaffClient({ initialDemo }: { initialDemo: DemoSchoolData | null }) {
-  const [demo, setDemo] = useState<DemoSchoolData | null>(initialDemo);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [credentials, setCredentials] = useState<StudentCredential[]>([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [credentialType, setCredentialType] = useState<(typeof credentialTypes)[number]["value"]>(
-    "nfc_wristband"
-  );
-  const [credentialLabel, setCredentialLabel] = useState("");
-  const [credentialToken, setCredentialToken] = useState("");
-  const [issuedToken, setIssuedToken] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+export function StaffClient() {
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
-  const [issuing, setIssuing] = useState(false);
-  const [revokingId, setRevokingId] = useState("");
+  const [message, setMessage] = useState<{ text: string; type: "ok" | "err" } | null>(null);
+  const [panel, setPanel] = useState<"none" | "create" | "edit" | "pin">("none");
+  const [editTarget, setEditTarget] = useState<StaffMember | null>(null);
+  const [form, setForm] = useState<FormState>(blankForm());
+  const [saving, setSaving] = useState(false);
 
-  async function loadData() {
+  useEffect(() => {
+    void loadAll();
+  }, []);
+
+  async function loadAll() {
     setLoading(true);
     setMessage(null);
     try {
-      const organization = initialDemo?.organization || (await loadCurrentOrganization());
-      const store = initialDemo?.store || (await loadCurrentStore(organization.id));
-      const seeded = initialDemo || { organization, store, products: [], students: [] };
-      const customersData = await apiGet<Customer[]>(
-        `/customers?organizationId=${seeded.organization.id}`
-      );
-      const credentialData = await apiGet<StudentCredential[]>(
-        `/student-credentials?organizationId=${seeded.organization.id}`
-      );
-
-      setDemo(seeded);
-      setCustomers(customersData);
-      setCredentials(credentialData);
-      setSelectedCustomerId((current) => current || customersData[0]?.id || "");
+      const org = await loadCurrentOrganization();
+      setOrganizationId(org.id);
+      const [staffData, storeData] = await Promise.all([
+        apiGet<StaffMember[]>(`/staff?organizationId=${org.id}`),
+        apiGet<Store[]>(`/stores?organizationId=${org.id}`)
+      ]);
+      setStaff(staffData);
+      setStores(storeData);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not load credential setup");
+      setMessage({ text: err instanceof Error ? err.message : "Could not load staff", type: "err" });
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    void loadData();
-  }, [initialDemo]);
+  function openCreate() {
+    setForm(blankForm());
+    setEditTarget(null);
+    setPanel("create");
+    setMessage(null);
+  }
 
-  const selectedCustomer = useMemo(
-    () => customers.find((customer) => customer.id === selectedCustomerId) || null,
-    [customers, selectedCustomerId]
-  );
+  function openEdit(member: StaffMember) {
+    setForm(staffToForm(member));
+    setEditTarget(member);
+    setPanel("edit");
+    setMessage(null);
+  }
 
-  const selectedCustomerCredentials = useMemo(
-    () => credentials.filter((credential) => credential.customerId === selectedCustomerId),
-    [credentials, selectedCustomerId]
-  );
+  function openPin(member: StaffMember) {
+    setForm({ ...staffToForm(member), pin: "" });
+    setEditTarget(member);
+    setPanel("pin");
+    setMessage(null);
+  }
 
-  async function issueCredential() {
-    if (!demo || !selectedCustomer) return;
+  function closePanel() {
+    setPanel("none");
+    setEditTarget(null);
+  }
 
-    setIssuing(true);
+  function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function toggleStore(storeId: string) {
+    setForm((f) => ({
+      ...f,
+      storeIds: f.storeIds.includes(storeId)
+        ? f.storeIds.filter((id) => id !== storeId)
+        : [...f.storeIds, storeId]
+    }));
+  }
+
+  async function handleCreate() {
+    if (!organizationId) return;
+    setSaving(true);
     setMessage(null);
     try {
-      const result = await apiPost<IssueResponse>("/student-credentials/issue", {
-        organizationId: demo.organization.id,
-        customerId: selectedCustomer.id,
-        credentialType,
-        credentialLabel: credentialLabel.trim() || undefined,
-        credentialToken: credentialToken.trim() || undefined
+      const created = await apiPost<StaffMember>("/staff", {
+        organizationId,
+        name: form.name.trim(),
+        email: form.email.trim() || null,
+        role: form.role,
+        pin: form.pin,
+        storeIds: form.storeIds
       });
-
-      setCredentials((current) => [result.credential, ...current]);
-      setIssuedToken(result.credentialToken);
-      setMessage(
-        `${result.credential.credentialType.replaceAll("_", " ")} issued for ${selectedCustomer.name || "student"}.`
-      );
-      setCredentialLabel("");
-      setCredentialToken("");
+      setStaff((s) => [...s, created]);
+      closePanel();
+      setMessage({ text: `${created.name || "Staff member"} added successfully.`, type: "ok" });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not issue credential");
+      setMessage({ text: err instanceof Error ? err.message : "Could not create staff", type: "err" });
     } finally {
-      setIssuing(false);
+      setSaving(false);
     }
   }
 
-  async function revokeCredential(credential: StudentCredential) {
-    if (!demo) return;
-
-    setRevokingId(credential.id);
+  async function handleEdit() {
+    if (!editTarget) return;
+    setSaving(true);
     setMessage(null);
     try {
-      const updated = await apiPost<StudentCredential>(`/student-credentials/${credential.id}/revoke`, {
-        organizationId: demo.organization.id
+      const updated = await apiPatch<StaffMember>(`/staff/${editTarget.id}`, {
+        name: form.name.trim(),
+        email: form.email.trim() || null,
+        role: form.role,
+        active: form.active
       });
-      setCredentials((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item))
-      );
-      setMessage(`Credential ${updated.credentialLabel || updated.id.slice(0, 8)} revoked.`);
+
+      await apiPost(`/staff/${editTarget.id}/stores`, { storeIds: form.storeIds });
+
+      setStaff((s) => s.map((m) => (m.id === updated.id ? { ...updated, storeIds: form.storeIds } : m)));
+      closePanel();
+      setMessage({ text: `${updated.name || "Staff member"} updated.`, type: "ok" });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not revoke credential");
+      setMessage({ text: err instanceof Error ? err.message : "Could not update staff", type: "err" });
     } finally {
-      setRevokingId("");
+      setSaving(false);
     }
   }
+
+  async function handleSetPin() {
+    if (!editTarget) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const updated = await apiPost<StaffMember>(`/staff/${editTarget.id}/pin`, { pin: form.pin });
+      setStaff((s) => s.map((m) => (m.id === updated.id ? { ...m, pinLast4: updated.pinLast4, pinSetAt: updated.pinSetAt } : m)));
+      closePanel();
+      setMessage({ text: `PIN updated for ${editTarget.name || "staff member"}.`, type: "ok" });
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : "Could not set PIN", type: "err" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(member: StaffMember) {
+    try {
+      const updated = await apiPatch<StaffMember>(`/staff/${member.id}`, { active: !member.active });
+      setStaff((s) => s.map((m) => (m.id === updated.id ? { ...m, active: updated.active } : m)));
+      setMessage({ text: `${updated.name || "Staff member"} ${updated.active ? "reactivated" : "deactivated"}.`, type: "ok" });
+    } catch (err) {
+      setMessage({ text: err instanceof Error ? err.message : "Could not update status", type: "err" });
+    }
+  }
+
+  const storeName = (id: string) => stores.find((s) => s.id === id)?.name ?? id.slice(0, 8);
+  const activeCount = staff.filter((s) => s.active).length;
 
   return (
     <section className="module">
-      <PageHeader eyebrow="Admin" title="Cash Register Employees & Credentials">
-        <button type="button" onClick={loadData} disabled={loading}>
+      <PageHeader eyebrow="Admin" title="Staff & Permissions">
+        <button type="button" onClick={loadAll} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
+        </button>
+        <button type="button" className="primaryAction" onClick={openCreate}>
+          Add staff
         </button>
       </PageHeader>
 
-      <div className="permissionStrip">
-        <div>
-          <span>Super admin</span>
-          <strong>Morgan Chen</strong>
-          <small>Can configure all locations, registers, staff roles, inventory rules, and reports.</small>
-        </div>
-        <div>
-          <span>Demo cashier</span>
-          <strong>Jordan Lee</strong>
-          <small>Can sell, select students, and complete wallet sales only.</small>
-        </div>
-        <div>
-          <span>Manager</span>
-          <strong>Riley Patel</strong>
-          <small>Can adjust inventory, review orders, and close registers.</small>
-        </div>
-        <div>
-          <span>Admin</span>
-          <strong>School operations</strong>
-          <small>Can manage settings, roles, integrations, credentials, and reports.</small>
-        </div>
-      </div>
-
       {message ? (
-        <p className="demoError" role="status">
-          {message}
+        <p className={`demoError${message.type === "ok" ? " success" : ""}`} role="status">
+          {message.text}
         </p>
       ) : null}
 
-      <div className="adminGrid">
-        <div className="adminCard">
-          <h3>Issue credential</h3>
-          <p>
-            Staff can create a new NFC card, wristband, QR, or barcode credential for the selected student.
-          </p>
-          <div className="fieldStack">
-            <span>Student</span>
-            <select value={selectedCustomerId} onChange={(event) => setSelectedCustomerId(event.target.value)}>
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name || "Unnamed student"} {customer.externalId ? `- ${customer.externalId}` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="fieldStack">
-            <span>Credential type</span>
-            <select value={credentialType} onChange={(event) => setCredentialType(event.target.value as (typeof credentialTypes)[number]["value"])}>
-              {credentialTypes.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="fieldStack">
-            <span>Label</span>
-            <input
-              value={credentialLabel}
-              onChange={(event) => setCredentialLabel(event.target.value)}
-              placeholder="Blue band, card 04, lunch line badge"
-            />
-          </div>
-          <div className="fieldStack">
-            <span>Optional token</span>
-            <input
-              value={credentialToken}
-              onChange={(event) => setCredentialToken(event.target.value)}
-              placeholder="Leave blank to auto-generate"
-            />
-          </div>
-          <button type="button" className="primaryAction" onClick={issueCredential} disabled={!selectedCustomerId || issuing}>
-            {issuing ? "Issuing..." : "Issue credential"}
-          </button>
-          {issuedToken ? (
-            <div className="credentialTokenBox">
-              <span>Write this token to the card or wristband</span>
-              <strong>{issuedToken}</strong>
-              <small>The token is what the register reads when the student taps.</small>
-            </div>
-          ) : null}
-          {selectedCustomer ? (
-            <p className="walletNote">
-              This creates the credential mapping only. The student record and wallet stay in Commerce POS.
-            </p>
-          ) : null}
+      <div className="statsRow">
+        <div className="statCard">
+          <span>{staff.length}</span>
+          <small>Total staff</small>
         </div>
-
-        <div className="adminCard">
-          <h3>Issued credentials</h3>
-          <p>Revoke a lost card or bracelet and issue a replacement.</p>
-          {selectedCustomerCredentials.length === 0 ? (
-            <p className="emptyState">No credentials issued for this student yet.</p>
-          ) : (
-            <div className="credentialList">
-              {selectedCustomerCredentials.map((credential) => (
-                <div className="credentialRow" key={credential.id}>
-                  <div>
-                    <strong>{credential.credentialLabel || credential.credentialType.replaceAll("_", " ")}</strong>
-                    <span>{credential.active ? "Active" : "Revoked"}</span>
-                    <small>
-                      {credential.externalId || credential.externalStudentId || "No student ID"}{" "}
-                      {credential.lastUsedAt ? `- Last used ${new Date(credential.lastUsedAt).toLocaleString()}` : ""}
-                    </small>
-                  </div>
-                  <div>
-                    <small>{credential.walletBalanceCents !== null ? formatMoney(credential.walletBalanceCents) : "No wallet"}</small>
-                    {credential.active ? (
-                      <button
-                        type="button"
-                        onClick={() => void revokeCredential(credential)}
-                        disabled={revokingId === credential.id}
-                      >
-                        {revokingId === credential.id ? "Revoking..." : "Revoke"}
-                      </button>
-                    ) : (
-                      <span className="badge danger">Revoked</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="tableWrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Student</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Issued</th>
-                </tr>
-              </thead>
-              <tbody>
-                {credentials.map((credential) => (
-                  <tr key={credential.id}>
-                    <td>{credential.customerName}</td>
-                    <td>{credential.credentialType.replaceAll("_", " ")}</td>
-                    <td>{credential.active ? "Active" : "Revoked"}</td>
-                    <td>{new Date(credential.issuedAt).toLocaleDateString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="walletNote">
-            If a vendor pre-encodes cards or bands, paste the token into the optional token field before issuing.
-          </p>
+        <div className="statCard">
+          <span>{activeCount}</span>
+          <small>Active</small>
+        </div>
+        <div className="statCard">
+          <span>{staff.filter((s) => s.pinLast4).length}</span>
+          <small>PIN set</small>
+        </div>
+        <div className="statCard">
+          <span>{stores.length}</span>
+          <small>Locations</small>
         </div>
       </div>
+
+      <div className="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Locations</th>
+              <th>PIN</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={6}>Loading staff...</td>
+              </tr>
+            ) : staff.length === 0 ? (
+              <tr>
+                <td colSpan={6}>No staff members found. Add your first staff member above.</td>
+              </tr>
+            ) : (
+              staff.map((member) => (
+                <tr key={member.id} className={member.active ? "" : "rowMuted"}>
+                  <td>
+                    <strong>{member.name || "—"}</strong>
+                    {member.email ? <small style={{ display: "block", color: "var(--muted)" }}>{member.email}</small> : null}
+                  </td>
+                  <td>
+                    <span className={`badge ${ROLE_COLORS[member.role] ?? "muted"}`}>
+                      {member.role.replace(/_/g, " ")}
+                    </span>
+                  </td>
+                  <td>
+                    {member.storeIds.length === 0 ? (
+                      <span style={{ color: "var(--muted)" }}>All / unassigned</span>
+                    ) : (
+                      member.storeIds.map((id) => (
+                        <span key={id} className="badge muted" style={{ marginRight: 4 }}>
+                          {storeName(id)}
+                        </span>
+                      ))
+                    )}
+                  </td>
+                  <td>
+                    {member.pinLast4 ? (
+                      <span style={{ fontFamily: "monospace" }}>••••{member.pinLast4}</span>
+                    ) : (
+                      <span className="badge danger">Not set</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`badge ${member.active ? "success" : "muted"}`}>
+                      {member.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button type="button" className="tableAction" onClick={() => openEdit(member)}>
+                        Edit
+                      </button>
+                      <button type="button" className="tableAction" onClick={() => openPin(member)}>
+                        Set PIN
+                      </button>
+                      <button
+                        type="button"
+                        className="tableAction"
+                        onClick={() => void toggleActive(member)}
+                      >
+                        {member.active ? "Deactivate" : "Reactivate"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {panel !== "none" ? (
+        <div className="staffPanelOverlay" onClick={closePanel}>
+          <div className="staffPanel" onClick={(e) => e.stopPropagation()}>
+            <div className="staffPanelHeader">
+              <h2>
+                {panel === "create" ? "Add staff member" : panel === "pin" ? "Set PIN" : `Edit — ${editTarget?.name || ""}`}
+              </h2>
+              <button type="button" className="staffPanelClose" onClick={closePanel} aria-label="Close">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            {panel === "pin" ? (
+              <div className="staffPanelBody">
+                <p>Set a new PIN for <strong>{editTarget?.name || "this staff member"}</strong>. This will immediately invalidate their current session.</p>
+                <label className="fieldStack">
+                  <span>New PIN (4–8 digits)</span>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    value={form.pin}
+                    onChange={(e) => setField("pin", e.target.value.replace(/\D/g, "").slice(0, 8))}
+                    placeholder="Enter new PIN"
+                    autoFocus
+                  />
+                </label>
+                <div className="staffPanelActions">
+                  <button type="button" onClick={closePanel}>Cancel</button>
+                  <button
+                    type="button"
+                    className="primaryAction"
+                    onClick={() => void handleSetPin()}
+                    disabled={saving || form.pin.length < 4}
+                  >
+                    {saving ? "Saving..." : "Set PIN"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="staffPanelBody">
+                <label className="fieldStack">
+                  <span>Full name</span>
+                  <input
+                    value={form.name}
+                    onChange={(e) => setField("name", e.target.value)}
+                    placeholder="Jordan Lee"
+                    autoFocus
+                  />
+                </label>
+                <label className="fieldStack">
+                  <span>Email (optional)</span>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setField("email", e.target.value)}
+                    placeholder="jordan@school.edu"
+                  />
+                </label>
+                <label className="fieldStack">
+                  <span>Role</span>
+                  <select value={form.role} onChange={(e) => setField("role", e.target.value)}>
+                    {ROLES.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {panel === "create" ? (
+                  <label className="fieldStack">
+                    <span>Initial PIN (4–8 digits)</span>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      value={form.pin}
+                      onChange={(e) => setField("pin", e.target.value.replace(/\D/g, "").slice(0, 8))}
+                      placeholder="e.g. 1234"
+                    />
+                  </label>
+                ) : (
+                  <label className="fieldStack">
+                    <span>Status</span>
+                    <select
+                      value={form.active ? "active" : "inactive"}
+                      onChange={(e) => setField("active", e.target.value === "active")}
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </label>
+                )}
+
+                {stores.length > 0 ? (
+                  <div className="fieldStack">
+                    <span>Store assignments</span>
+                    <div className="storeCheckboxes">
+                      {stores.map((store) => (
+                        <label key={store.id} className="checkboxRow">
+                          <input
+                            type="checkbox"
+                            checked={form.storeIds.includes(store.id)}
+                            onChange={() => toggleStore(store.id)}
+                          />
+                          {store.name}
+                        </label>
+                      ))}
+                    </div>
+                    <small style={{ color: "var(--muted)" }}>Leave unselected to allow access to all stores.</small>
+                  </div>
+                ) : null}
+
+                <div className="staffPanelActions">
+                  <button type="button" onClick={closePanel}>Cancel</button>
+                  <button
+                    type="button"
+                    className="primaryAction"
+                    onClick={() => void (panel === "create" ? handleCreate() : handleEdit())}
+                    disabled={saving || !form.name.trim() || (panel === "create" && form.pin.length < 4)}
+                  >
+                    {saving ? "Saving..." : panel === "create" ? "Add staff member" : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

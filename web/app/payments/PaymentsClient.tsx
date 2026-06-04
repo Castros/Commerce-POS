@@ -7,6 +7,7 @@ import { PageHeader } from "../components/PageHeader";
 import { apiGet, apiPost } from "../lib/api";
 import type { CashDrawerSession, DemoSchoolData } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
+import { loadRegisterContext } from "../lib/organizationContext";
 
 const registerName = "Lunch Line 02";
 
@@ -33,7 +34,7 @@ export function PaymentsClient() {
   async function loadDrawers(existingDemo = demo) {
     try {
       setError(null);
-      const data = existingDemo || (await apiPost<DemoSchoolData>("/demo/school", {}));
+      const data = existingDemo || { ...(await loadRegisterContext()), students: [] };
       if (!existingDemo) setDemo(data);
       const params = new URLSearchParams({
         organizationId: data.organization.id,
@@ -58,7 +59,8 @@ export function PaymentsClient() {
 
   async function openDrawer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = demo || (await apiPost<DemoSchoolData>("/demo/school", {}));
+    const data = demo || { ...(await loadRegisterContext()), students: [] };
+    if (!demo) setDemo(data);
     setSaving(true);
     setError(null);
     setMessage(null);

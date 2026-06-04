@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
-import { requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, authorizeStore, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, notFound, parseZod } from "../../shared/http/errors.js";
 
 export const inventoryRouter = Router();
@@ -26,6 +26,7 @@ inventoryRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const query = parseZod(inventoryQuerySchema, req.query);
+    authorizeTenant(req.actor, query.organizationId);
     const values = [query.organizationId];
     const clauses = ["p.organization_id = $1", "p.active = TRUE"];
 
@@ -82,6 +83,7 @@ inventoryRouter.post(
   asyncHandler(async (req, res) => {
     const productId = z.string().uuid().parse(req.params.productId);
     const body = parseZod(adjustmentSchema, req.body);
+    await authorizeStore(req.actor, body.organizationId, body.storeId);
 
     const client = await pool.connect();
     try {

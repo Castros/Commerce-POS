@@ -7,6 +7,7 @@ import { PageHeader } from "../components/PageHeader";
 import { apiGet, apiPost } from "../lib/api";
 import type { DemoSchoolData, InventoryItem } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
+import { loadRegisterContext } from "../lib/organizationContext";
 
 function toNumber(value: number | string) {
   return typeof value === "string" ? Number(value) : value;
@@ -34,7 +35,7 @@ export function InventoryClient() {
   async function loadInventory(nextLowStockOnly = lowStockOnly) {
     try {
       setError(null);
-      const data = demo || (await apiPost<DemoSchoolData>("/demo/school", {}));
+      const data = demo || { ...(await loadRegisterContext()), students: [] };
       setDemo(data);
       const params = new URLSearchParams({
         organizationId: data.organization.id,

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
@@ -9,12 +10,21 @@ import {
   resolveBrowserSessionFromRequest,
   revokeBrowserSession,
   serializeBrowserSessionCookie,
+  SESSION_TTL_SECONDS,
   verifyPin,
   BROWSER_SESSION_COOKIE
 } from "../../shared/auth/browserAuth.js";
 import { asyncHandler, unauthorized } from "../../shared/http/errors.js";
 
 export const authRouter = Router();
+
+const loginRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: "Too many login attempts. Please wait a minute and try again." },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 const loginSchema = z.object({
   organizationId: z.string().uuid().nullable().optional(),
@@ -26,7 +36,8 @@ function buildSessionCookie(token) {
   const secure = process.env.NODE_ENV === "production";
   return serializeBrowserSessionCookie(token, {
     secure,
-    sameSite: "Lax"
+    sameSite: "Strict",
+    maxAge: SESSION_TTL_SECONDS
   });
 }
 
@@ -91,8 +102,32 @@ async function resolveUserForLogin({ organizationId, identifier, pin }) {
   return null;
 }
 
+authRouter.get(
+  "/orgs",
+  asyncHandler(async (req, res) => {
+    const q = z.string().min(1).max(100).optional().parse(req.query.q);
+    if (!q) {
+      res.json({ data: [] });
+      return;
+    }
+    const result = await pool.query(
+      `
+        SELECT id, name, type
+        FROM commerce_organizations
+        WHERE active = TRUE
+          AND name ILIKE $1
+        ORDER BY name ASC
+        LIMIT 10
+      `,
+      [`%${q}%`]
+    );
+    res.json({ data: result.rows });
+  })
+);
+
 authRouter.post(
   "/login",
+  loginRateLimit,
   asyncHandler(async (req, res) => {
     const body = loginSchema.parse(req.body);
     const user = await resolveUserForLogin(body);
@@ -175,8 +210,10 @@ authRouter.get(
     const result = await pool.query(
       `
         SELECT u.id, u.organization_id AS "organizationId", u.email, u.name, u.role, u.active,
-               u.pin_last4 AS "pinLast4", u.pin_set_at AS "pinSetAt"
+               u.pin_last4 AS "pinLast4", u.pin_set_at AS "pinSetAt",
+               o.name AS "organizationName"
         FROM commerce_users u
+        JOIN commerce_organizations o ON o.id = u.organization_id
         WHERE u.id = $1
           AND u.organization_id = $2
           AND u.active = TRUE
@@ -206,6 +243,7 @@ authRouter.get(
         user: {
           id: user.id,
           organizationId: user.organizationId,
+          organizationName: user.organizationName,
           email: user.email,
           name: user.name,
           role: user.role,
@@ -224,11 +262,19 @@ authRouter.get(
   "/options",
   asyncHandler(async (req, res) => {
     const browserSession = await resolveBrowserSessionFromRequest(req);
-    if (process.env.NODE_ENV === "production" && !browserSession) {
-      throw unauthorized("Login required");
+    const organizationId = z.string().uuid().optional().parse(req.query.organizationId);
+
+    if (process.env.NODE_ENV === "production" && !browserSession && !organizationId) {
+      throw unauthorized("Organization context required");
     }
 
-    const organizationId = z.string().uuid().optional().parse(req.query.organizationId);
+    const effectiveOrgId = browserSession?.organizationId || organizationId || null;
+
+    if (!effectiveOrgId) {
+      res.json({ data: [] });
+      return;
+    }
+
     const result = await pool.query(
       `
         SELECT id, organization_id AS "organizationId", email, name, role, active, pin_last4 AS "pinLast4"
@@ -237,7 +283,7 @@ authRouter.get(
           AND ($1::uuid IS NULL OR organization_id = $1)
         ORDER BY created_at ASC
       `,
-      [organizationId || null]
+      [effectiveOrgId]
     );
 
     res.json({

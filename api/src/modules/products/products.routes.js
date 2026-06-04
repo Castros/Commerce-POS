@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
-import { requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, parseZod } from "../../shared/http/errors.js";
 
 export const productsRouter = Router();
@@ -46,6 +46,7 @@ productsRouter.get(
       })
       .parse(req.query);
 
+    authorizeTenant(req.actor, query.organizationId);
     const values = [query.organizationId];
     let storeClause = "";
     if (query.storeId) {
@@ -76,6 +77,7 @@ productsRouter.patch(
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
     const body = parseZod(updateProductSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
 
     const result = await pool.query(
       `
@@ -124,6 +126,7 @@ productsRouter.post(
   requirePermission("products:write"),
   asyncHandler(async (req, res) => {
     const body = parseZod(createProductSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
     const result = await pool.query(
       `
         INSERT INTO commerce_products (

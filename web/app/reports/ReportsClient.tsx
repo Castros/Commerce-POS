@@ -3,66 +3,58 @@
 import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "../components/DataTable";
 import { PageHeader } from "../components/PageHeader";
-import { apiGet, apiPost } from "../lib/api";
-import type { DemoSchoolData } from "../lib/demoTypes";
+import { apiGet } from "../lib/api";
+import type { Store } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
+import { loadCurrentOrganization } from "../lib/organizationContext";
 import type { ReportSummary } from "./reportsTypes";
 
 type DatePreset = "today" | "week" | "month" | "custom";
 
 function dateInputValue(date: Date) {
-  return date.toISOString().slice(0, 10);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function startOfToday() {
   const date = new Date();
-  date.setUTCHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
   return date;
 }
 
 function startOfWeek() {
   const date = startOfToday();
-  const day = date.getUTCDay();
+  const day = date.getDay();
   const diff = day === 0 ? 6 : day - 1;
-  date.setUTCDate(date.getUTCDate() - diff);
+  date.setDate(date.getDate() - diff);
   return date;
 }
 
 function startOfMonth() {
   const date = startOfToday();
-  date.setUTCDate(1);
+  date.setDate(1);
   return date;
 }
 
 function endOfSelectedDay(value: string) {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + 1);
+  // Parse as local midnight so the range end respects the user's timezone
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + 1);
   return date.toISOString();
 }
 
 function presetRange(preset: DatePreset) {
   const today = startOfToday();
-  const tomorrow = new Date(today);
-  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
   if (preset === "week") {
-    return {
-      from: dateInputValue(startOfWeek()),
-      to: dateInputValue(today)
-    };
+    return { from: dateInputValue(startOfWeek()), to: dateInputValue(today) };
   }
-
   if (preset === "month") {
-    return {
-      from: dateInputValue(startOfMonth()),
-      to: dateInputValue(today)
-    };
+    return { from: dateInputValue(startOfMonth()), to: dateInputValue(today) };
   }
-
-  return {
-    from: dateInputValue(today),
-    to: dateInputValue(today)
-  };
+  return { from: dateInputValue(today), to: dateInputValue(today) };
 }
 
 function methodLabel(method: string) {
@@ -88,7 +80,8 @@ function shortDate(value: string | null) {
 }
 
 export function ReportsClient() {
-  const [demo, setDemo] = useState<DemoSchoolData | null>(null);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [stores, setStores] = useState<Store[]>([]);
   const [report, setReport] = useState<ReportSummary | null>(null);
   const [preset, setPreset] = useState<DatePreset>("today");
   const initialRange = useMemo(() => presetRange("today"), []);
@@ -99,21 +92,25 @@ export function ReportsClient() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
-  async function loadReport(existingDemo = demo) {
+  async function loadReport(orgId = organizationId) {
     setLoading(true);
     setError(null);
     try {
-      const schoolData = existingDemo || (await apiPost<DemoSchoolData>("/demo/school", {}));
-      setDemo(schoolData);
+      let resolvedOrgId = orgId;
+      if (!resolvedOrgId) {
+        const org = await loadCurrentOrganization();
+        resolvedOrgId = org.id;
+        setOrganizationId(org.id);
+        const storeList = await apiGet<Store[]>(`/stores?organizationId=${org.id}`);
+        setStores(storeList);
+      }
 
       const params = new URLSearchParams({
-        organizationId: schoolData.organization.id,
-        dateFrom: new Date(`${dateFrom}T00:00:00.000Z`).toISOString(),
+        organizationId: resolvedOrgId,
+        dateFrom: new Date(`${dateFrom}T00:00:00`).toISOString(),
         dateTo: endOfSelectedDay(dateTo)
       });
-      if (storeId) {
-        params.set("storeId", storeId);
-      }
+      if (storeId) params.set("storeId", storeId);
 
       const data = await apiGet<ReportSummary>(`/reports/summary?${params}`);
       setReport(data);
@@ -152,10 +149,9 @@ export function ReportsClient() {
   return (
     <section className="module">
       <PageHeader eyebrow="Analytics" title="Reports">
-        <button type="button" onClick={() => loadReport()} disabled={loading}>
+        <button type="button" onClick={() => void loadReport()} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
         </button>
-        <button type="button" disabled>Export CSV later</button>
       </PageHeader>
 
       {error ? <p className="demoError">{error}</p> : null}
@@ -196,24 +192,26 @@ export function ReportsClient() {
           Store
           <select value={storeId} onChange={(event) => setStoreId(event.target.value)}>
             <option value="">All stores</option>
-            {demo?.store ? <option value={demo.store.id}>{demo.store.name}</option> : null}
+            {stores.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
         </label>
-        <button type="button" onClick={() => loadReport()} disabled={loading}>
+        <button type="button" onClick={() => void loadReport()} disabled={loading}>
           Apply filters
         </button>
       </div>
 
       <div className="permissionStrip">
         <div>
-          <span>Admin reporting</span>
+          <span>Reporting scope</span>
           <strong>Sales, payments, wallets, and drawers</strong>
-          <small>Filtered by school, store, and date range. Register-level sales need register metadata on all order types later.</small>
+          <small>Filtered by store and date range.</small>
         </div>
         <div>
           <span>Last updated</span>
           <strong>{lastUpdated ? shortDate(lastUpdated) : "Not loaded"}</strong>
-          <small>Use Refresh after live register sales or refunds.</small>
+          <small>Refresh after live sales or refunds.</small>
         </div>
       </div>
 
@@ -221,7 +219,7 @@ export function ReportsClient() {
         <div className="metricTile">
           <span>Gross sales</span>
           <strong>{formatMoney(report?.totals.grossSalesCents || 0)}</strong>
-          <small>Paid sales before refunded order total.</small>
+          <small>Paid sales before refunds.</small>
         </div>
         <div className="metricTile">
           <span>Net sales</span>
@@ -281,7 +279,7 @@ export function ReportsClient() {
         </div>
 
         <div className="chartPanel">
-          <h3>Wallet & credit activity</h3>
+          <h3>Wallet &amp; credit activity</h3>
           <dl className="reportStats">
             <div>
               <dt>Top-ups</dt>
@@ -348,4 +346,3 @@ export function ReportsClient() {
     </section>
   );
 }
-

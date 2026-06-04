@@ -2,8 +2,8 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
-import { createPaidSale, createWalletSale, refundOrder } from "./orders.service.js";
-import { getActor, requirePermission } from "../../shared/auth/auth.js";
+import { createPaidSale, createWalletSale, partialRefundOrder, refundOrder } from "./orders.service.js";
+import { authorizeTenant, authorizeStore, getActor, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, parseZod } from "../../shared/http/errors.js";
 
 export const ordersRouter = Router();
@@ -44,6 +44,15 @@ const refundOrderSchema = z.object({
   reason: z.string().max(500).optional()
 });
 
+const partialRefundSchema = z.object({
+  organizationId: z.string().uuid(),
+  items: z.array(z.object({
+    itemId: z.string().uuid(),
+    quantity: z.number().int().positive()
+  })).min(1),
+  reason: z.string().max(500).optional()
+});
+
 ordersRouter.get(
   "/",
   asyncHandler(async (req, res) => {
@@ -56,6 +65,7 @@ ordersRouter.get(
       }),
       req.query
     );
+    authorizeTenant(req.actor, query.organizationId);
 
     const values = [query.organizationId];
     const clauses = ["o.organization_id = $1"];
@@ -119,6 +129,7 @@ ordersRouter.get(
       }),
       req.query
     );
+    authorizeTenant(req.actor, query.organizationId);
 
     const orderResult = await pool.query(
       `
@@ -168,6 +179,7 @@ ordersRouter.get(
                name_snapshot AS "name",
                unit_price_cents AS "unitPriceCents",
                quantity,
+               refunded_quantity AS "refundedQuantity",
                line_total_cents AS "lineTotalCents",
                currency,
                created_at AS "createdAt"
@@ -234,11 +246,38 @@ ordersRouter.post(
 
     const body = parseZod(refundOrderSchema, req.body);
     const actor = getActor(req);
+    authorizeTenant(actor, body.organizationId);
     const result = await refundOrder({
       body: {
         ...body,
         orderId: req.params.id
       },
+      idempotencyKey,
+      requestId: req.requestId,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent") || null,
+      actorUserId: actor.actorUserId,
+      actorService: actor.actorService
+    });
+
+    res.status(result.status).json(result.body);
+  })
+);
+
+ordersRouter.post(
+  "/:id/partial-refund",
+  requirePermission("orders:write"),
+  asyncHandler(async (req, res) => {
+    const idempotencyKey = req.get("Idempotency-Key");
+    if (!idempotencyKey) {
+      throw badRequest("Idempotency-Key header is required");
+    }
+
+    const body = parseZod(partialRefundSchema, req.body);
+    const actor = getActor(req);
+    authorizeTenant(actor, body.organizationId);
+    const result = await partialRefundOrder({
+      body: { ...body, orderId: req.params.id },
       idempotencyKey,
       requestId: req.requestId,
       ipAddress: req.ip,
@@ -262,6 +301,7 @@ ordersRouter.post(
 
     const body = parseZod(paidSaleSchema, req.body);
     const actor = getActor(req);
+    await authorizeStore(actor, body.organizationId, body.storeId);
     const result = await createPaidSale({
       body,
       idempotencyKey,
@@ -287,6 +327,7 @@ ordersRouter.post(
 
     const body = parseZod(walletSaleSchema, req.body);
     const actor = getActor(req);
+    await authorizeStore(actor, body.organizationId, body.storeId);
     const result = await createWalletSale({
       body,
       idempotencyKey,

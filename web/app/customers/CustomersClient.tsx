@@ -5,8 +5,9 @@ import { DataTable } from "../components/DataTable";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { apiGet, apiPost } from "../lib/api";
-import type { DemoSchoolData, DemoStudent } from "../lib/demoTypes";
+import type { DemoStudent, Organization } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
+import { loadCurrentOrganization } from "../lib/organizationContext";
 
 type AddForm = {
   name: string;
@@ -18,7 +19,7 @@ type AddForm = {
 const emptyForm: AddForm = { name: "", externalId: "", email: "", phone: "" };
 
 export function CustomersClient() {
-  const [demo, setDemo] = useState<DemoSchoolData | null>(null);
+  const [organization, setOrganization] = useState<Organization | null>(null);
   const [students, setStudents] = useState<DemoStudent[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -28,23 +29,21 @@ export function CustomersClient() {
   const [addError, setAddError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  async function loadStudents(existingDemo?: DemoSchoolData) {
+  async function loadStudents(existingOrganization?: Organization) {
     try {
       setError(null);
-      const schoolData = existingDemo || demo || (await apiPost<DemoSchoolData>("/demo/school", {}));
-      if (!existingDemo && !demo) setDemo(schoolData);
+      const currentOrganization = existingOrganization || organization || (await loadCurrentOrganization());
+      if (!existingOrganization && !organization) setOrganization(currentOrganization);
       const customers = await apiGet<Omit<DemoStudent, "wallet">[]>(
-        `/customers?organizationId=${schoolData.organization.id}`
+        `/customers?organizationId=${currentOrganization.id}`
       );
       const wallets = await apiGet<DemoStudent["wallet"][]>(
-        `/wallets?organizationId=${schoolData.organization.id}`
+        `/wallets?organizationId=${currentOrganization.id}`
       );
       const merged: DemoStudent[] = customers.map((customer) => ({
         ...customer,
         wallet:
           wallets.find((w) => w.customerId === customer.id) ||
-          schoolData.students.find((s) => s.id === customer.id)?.wallet ||
-          schoolData.students[0]?.wallet ||
           { id: "", organizationId: "", customerId: customer.id, balanceCents: 0, currency: "USD", active: true }
       }));
       setStudents(merged);
@@ -82,12 +81,13 @@ export function CustomersClient() {
       setAddError("Name is required");
       return;
     }
-    const schoolData = demo || (await apiPost<DemoSchoolData>("/demo/school", {}));
+    const currentOrganization = organization || (await loadCurrentOrganization());
+    if (!organization) setOrganization(currentOrganization);
     setSaving(true);
     setAddError(null);
     try {
       await apiPost("/customers", {
-        organizationId: schoolData.organization.id,
+        organizationId: currentOrganization.id,
         name: form.name.trim(),
         externalId: form.externalId.trim() || null,
         email: form.email.trim() || null,
@@ -95,7 +95,7 @@ export function CustomersClient() {
       });
       setForm(emptyForm);
       setShowAdd(false);
-      await loadStudents(schoolData);
+      await loadStudents(currentOrganization);
     } catch (err) {
       setAddError(err instanceof Error ? err.message : "Could not add customer");
     } finally {

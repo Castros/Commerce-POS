@@ -1,6 +1,6 @@
 import { withTransaction } from "../../db/transaction.js";
 import { insertAuditEvent } from "../../shared/audit/audit.js";
-import { conflict, notFound, paymentRequired } from "../../shared/http/errors.js";
+import { badRequest, conflict, notFound, paymentRequired } from "../../shared/http/errors.js";
 import {
   hashRequestBody,
   lockIdempotencyKey,
@@ -1139,6 +1139,289 @@ export async function refundOrder({
     if (err.code === "23505") {
       throw conflict("Duplicate refund or idempotency conflict");
     }
+    throw err;
+  });
+}
+
+export async function partialRefundOrder({
+  body,
+  idempotencyKey,
+  requestId,
+  ipAddress,
+  userAgent,
+  actorUserId,
+  actorService
+}) {
+  const requestHash = hashRequestBody(body);
+
+  return withTransaction(async (client) => {
+    const idempotency = await lockIdempotencyKey(client, {
+      organizationId: body.organizationId,
+      idempotencyKey,
+      requestHash
+    });
+
+    if (idempotency.replay) {
+      return { status: idempotency.status, body: idempotency.body };
+    }
+
+    const order = (
+      await client.query(
+        `SELECT * FROM commerce_orders
+         WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
+        [body.organizationId, body.orderId]
+      )
+    ).rows[0];
+
+    if (!order) throw notFound("Order not found");
+    if (!["paid", "partially_refunded"].includes(order.status)) {
+      throw conflict("Only paid or partially refunded orders can be partially refunded");
+    }
+
+    const payment = (
+      await client.query(
+        `SELECT * FROM commerce_payments
+         WHERE organization_id = $1 AND order_id = $2 AND status = 'succeeded'`,
+        [body.organizationId, body.orderId]
+      )
+    ).rows[0];
+
+    if (!payment) throw conflict("No refundable payment found");
+
+    const orderItemsResult = await client.query(
+      `SELECT * FROM commerce_order_items
+       WHERE organization_id = $1 AND order_id = $2`,
+      [body.organizationId, body.orderId]
+    );
+    const itemsById = new Map(orderItemsResult.rows.map((r) => [r.id, r]));
+
+    let refundAmountCents = 0;
+    const refundItems = [];
+
+    for (const refundItem of body.items) {
+      const item = itemsById.get(refundItem.itemId);
+      if (!item) throw notFound(`Order item not found: ${refundItem.itemId}`);
+      const available = toInt(item.quantity) - toInt(item.refunded_quantity);
+      if (refundItem.quantity > available) {
+        throw conflict(`Cannot refund more than available quantity for "${item.name_snapshot}"`);
+      }
+      if (refundItem.quantity <= 0) throw badRequest("Refund quantity must be positive");
+      const lineCents = toInt(item.unit_price_cents) * refundItem.quantity;
+      refundAmountCents += lineCents;
+      refundItems.push({ item, refundQuantity: refundItem.quantity, lineCents });
+    }
+
+    for (const { item, refundQuantity } of refundItems) {
+      await client.query(
+        `UPDATE commerce_order_items
+         SET refunded_quantity = refunded_quantity + $3
+         WHERE organization_id = $1 AND id = $2`,
+        [body.organizationId, item.id, refundQuantity]
+      );
+    }
+
+    const updatedItems = (
+      await client.query(
+        `SELECT quantity, refunded_quantity FROM commerce_order_items
+         WHERE organization_id = $1 AND order_id = $2`,
+        [body.organizationId, body.orderId]
+      )
+    ).rows;
+
+    const allRefunded = updatedItems.every(
+      (r) => toInt(r.refunded_quantity) === toInt(r.quantity)
+    );
+    const newOrderStatus = allRefunded ? "refunded" : "partially_refunded";
+
+    const inventoryMovements = [];
+    for (const { item, refundQuantity } of refundItems) {
+      const inventory = (
+        await client.query(
+          `SELECT quantity_on_hand FROM commerce_inventory_items
+           WHERE organization_id = $1 AND store_id = $2 AND product_id = $3 FOR UPDATE`,
+          [body.organizationId, order.store_id, item.product_id]
+        )
+      ).rows[0];
+
+      if (!inventory) continue;
+
+      const quantityAfter = toInt(inventory.quantity_on_hand) + refundQuantity;
+      await client.query(
+        `UPDATE commerce_inventory_items
+         SET quantity_on_hand = $4, updated_at = NOW()
+         WHERE organization_id = $1 AND store_id = $2 AND product_id = $3`,
+        [body.organizationId, order.store_id, item.product_id, quantityAfter]
+      );
+
+      const movement = (
+        await client.query(
+          `INSERT INTO commerce_inventory_movements (
+             organization_id, store_id, product_id, order_id, type,
+             quantity_delta, quantity_after, note, created_by_user_id
+           )
+           VALUES ($1, $2, $3, $4, 'adjustment', $5, $6, 'Partial refund stock return', $7)
+           RETURNING product_id, quantity_delta, quantity_after`,
+          [
+            body.organizationId, order.store_id, item.product_id, order.id,
+            refundQuantity, quantityAfter, actorUserId
+          ]
+        )
+      ).rows[0];
+      inventoryMovements.push(movement);
+    }
+
+    let wallet = null;
+    if (payment.method === "wallet") {
+      const purchase = (
+        await client.query(
+          `SELECT wallet_account_id FROM commerce_wallet_transactions
+           WHERE organization_id = $1 AND order_id = $2 AND type = 'purchase' LIMIT 1`,
+          [body.organizationId, body.orderId]
+        )
+      ).rows[0];
+
+      if (purchase) {
+        const walletAcc = (
+          await client.query(
+            `SELECT id, balance_cents, credit_limit_cents, currency
+             FROM commerce_wallet_accounts
+             WHERE organization_id = $1 AND id = $2 FOR UPDATE`,
+            [body.organizationId, purchase.wallet_account_id]
+          )
+        ).rows[0];
+
+        if (walletAcc) {
+          const balanceAfter = toInt(walletAcc.balance_cents) + refundAmountCents;
+          await client.query(
+            `UPDATE commerce_wallet_accounts
+             SET balance_cents = $3, updated_at = NOW()
+             WHERE organization_id = $1 AND id = $2`,
+            [body.organizationId, walletAcc.id, balanceAfter]
+          );
+          await client.query(
+            `INSERT INTO commerce_wallet_transactions (
+               organization_id, wallet_account_id, order_id, type,
+               amount_cents, balance_after_cents, source, note, created_by_user_id
+             )
+             VALUES ($1, $2, $3, 'refund', $4, $5, 'order_partial_refund', 'Partial refund', $6)`,
+            [body.organizationId, walletAcc.id, order.id, refundAmountCents, balanceAfter, actorUserId]
+          );
+          wallet = {
+            id: walletAcc.id,
+            balanceCents: balanceAfter,
+            creditLimitCents: toInt(walletAcc.credit_limit_cents || 0),
+            currency: walletAcc.currency
+          };
+        }
+      }
+    }
+
+    let cashDrawer = null;
+    if (payment.method === "cash") {
+      const cashSale = (
+        await client.query(
+          `SELECT e.session_id, e.store_id, s.expected_cash_cents, s.register_name, s.status
+           FROM commerce_cash_drawer_events e
+           JOIN commerce_cash_drawer_sessions s
+             ON s.organization_id = e.organization_id AND s.id = e.session_id
+           WHERE e.organization_id = $1 AND e.order_id = $2 AND e.type = 'cash_sale'
+           LIMIT 1 FOR UPDATE OF s`,
+          [body.organizationId, body.orderId]
+        )
+      ).rows[0];
+
+      if (cashSale) {
+        if (cashSale.status !== "open") {
+          throw conflict("Cannot refund cash sale after drawer is closed");
+        }
+        const expectedAfter = toInt(cashSale.expected_cash_cents) - refundAmountCents;
+        await client.query(
+          `UPDATE commerce_cash_drawer_sessions SET expected_cash_cents = $3
+           WHERE organization_id = $1 AND id = $2`,
+          [body.organizationId, cashSale.session_id, expectedAfter]
+        );
+        await client.query(
+          `INSERT INTO commerce_cash_drawer_events (
+             organization_id, store_id, session_id, order_id, type,
+             amount_cents, cash_balance_after_cents, note, created_by_user_id
+           )
+           VALUES ($1, $2, $3, $4, 'adjustment', $5, $6, 'Partial cash refund', $7)`,
+          [
+            body.organizationId, cashSale.store_id, cashSale.session_id, order.id,
+            -refundAmountCents, expectedAfter, actorUserId
+          ]
+        );
+        cashDrawer = {
+          id: cashSale.session_id,
+          registerName: cashSale.register_name,
+          expectedCashCents: expectedAfter
+        };
+      }
+    }
+
+    const updatedOrder = (
+      await client.query(
+        `UPDATE commerce_orders
+         SET status = $3,
+             payment_status = CASE WHEN $3 = 'refunded' THEN 'refunded' ELSE payment_status END
+         WHERE organization_id = $1 AND id = $2
+         RETURNING *`,
+        [body.organizationId, body.orderId, newOrderStatus]
+      )
+    ).rows[0];
+
+    await insertAuditEvent(client, {
+      organizationId: body.organizationId,
+      storeId: order.store_id,
+      actorUserId,
+      actorService,
+      action: "order.partial_refund",
+      targetType: "order",
+      targetId: order.id,
+      summary: {
+        refundAmountCents,
+        paymentMethod: payment.method,
+        itemCount: refundItems.length,
+        reason: body.reason || null
+      },
+      requestId,
+      idempotencyKey,
+      ipAddress,
+      userAgent
+    });
+
+    const responseBody = {
+      data: {
+        order: {
+          id: updatedOrder.id,
+          organizationId: updatedOrder.organization_id,
+          status: updatedOrder.status,
+          paymentStatus: updatedOrder.payment_status,
+          totalCents: toInt(updatedOrder.total_cents),
+          currency: updatedOrder.currency
+        },
+        refundAmountCents,
+        itemCount: refundItems.length,
+        wallet,
+        cashDrawer,
+        inventory: inventoryMovements.map((m) => ({
+          productId: m.product_id,
+          quantityDelta: m.quantity_delta,
+          quantityAfter: m.quantity_after
+        }))
+      }
+    };
+
+    await storeIdempotentResponse(client, {
+      organizationId: body.organizationId,
+      idempotencyKey,
+      status: 200,
+      body: responseBody
+    });
+
+    return { status: 200, body: responseBody };
+  }).catch((err) => {
+    if (err.code === "23505") throw conflict("Duplicate refund or idempotency conflict");
     throw err;
   });
 }

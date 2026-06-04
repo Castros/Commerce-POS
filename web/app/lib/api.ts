@@ -24,7 +24,8 @@ async function readApiPayload<T>(response: Response): Promise<ApiEnvelope<T>> {
 
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
-    cache: "no-store"
+    cache: "no-store",
+    credentials: "include"
   });
   const payload = await readApiPayload<T>(response);
   return (payload as ApiEnvelope<T>).data;
@@ -41,6 +42,7 @@ export async function apiPost<T>(
       "content-type": "application/json",
       ...headers
     },
+    credentials: "include",
     body: JSON.stringify(body)
   });
   const payload = await readApiPayload<T>(response);
@@ -58,6 +60,7 @@ export async function apiPatch<T>(
       "content-type": "application/json",
       ...headers
     },
+    credentials: "include",
     body: JSON.stringify(body)
   });
   const payload = await readApiPayload<T>(response);

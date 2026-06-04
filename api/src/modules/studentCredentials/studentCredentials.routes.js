@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
-import { requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, requirePermission } from "../../shared/auth/auth.js";
 import {
   asyncHandler,
   badRequest,
@@ -137,6 +137,7 @@ studentCredentialsRouter.get(
   requirePermission("credentials:write"),
   asyncHandler(async (req, res) => {
     const query = parseZod(listSchema, req.query);
+    authorizeTenant(req.actor, query.organizationId);
 
     const result = await pool.query(
       `
@@ -188,6 +189,7 @@ studentCredentialsRouter.post(
   requirePermission("credentials:write"),
   asyncHandler(async (req, res) => {
     const body = parseZod(issueSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
 
     const data = await withTransaction(async (client) => {
       const { customer, wallet } = await loadCustomerWallet(
@@ -267,6 +269,7 @@ studentCredentialsRouter.post(
   requirePermission("customers:write"),
   asyncHandler(async (req, res) => {
     const body = parseZod(resolveSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
     const credentialTokenHash = hashToken(body.credentialToken);
 
     const data = await withTransaction(async (client) => {
@@ -365,6 +368,7 @@ studentCredentialsRouter.post(
   requirePermission("credentials:write"),
   asyncHandler(async (req, res) => {
     const body = parseZod(revokeSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
     const credentialId = z.string().uuid().parse(req.params.credentialId);
 
     const data = await withTransaction(async (client) => {
