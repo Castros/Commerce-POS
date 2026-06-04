@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
-import { requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, parseZod } from "../../shared/http/errors.js";
 
 export const customersRouter = Router();
@@ -21,6 +21,7 @@ customersRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const organizationId = z.string().uuid().parse(req.query.organizationId);
+    authorizeTenant(req.actor, organizationId);
     const result = await pool.query(
       `
         SELECT id, organization_id AS "organizationId",
@@ -43,6 +44,7 @@ customersRouter.post(
   requirePermission("customers:write"),
   asyncHandler(async (req, res) => {
     const body = parseZod(createCustomerSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
     const result = await pool.query(
       `
         INSERT INTO commerce_customers (

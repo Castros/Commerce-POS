@@ -4,7 +4,7 @@ import { z } from "zod";
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { insertAuditEvent } from "../../shared/audit/audit.js";
-import { getActor, requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, getActor, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, notFound, parseZod } from "../../shared/http/errors.js";
 
 export const walletsRouter = Router();
@@ -32,6 +32,7 @@ walletsRouter.get(
       req.query
     );
 
+    authorizeTenant(req.actor, query.organizationId);
     const values = [query.organizationId];
     let customerClause = "";
     if (query.customerId) {
@@ -61,6 +62,7 @@ walletsRouter.post(
   requirePermission("wallets:write"),
   asyncHandler(async (req, res) => {
     const body = parseZod(createWalletSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
     const result = await pool.query(
       `
         INSERT INTO commerce_wallet_accounts (organization_id, customer_id)
@@ -91,6 +93,7 @@ walletsRouter.get(
       }),
       req.query
     );
+    authorizeTenant(req.actor, query.organizationId);
 
     const result = await pool.query(
       `
@@ -122,6 +125,7 @@ walletsRouter.post(
   asyncHandler(async (req, res) => {
     const body = parseZod(topUpSchema, req.body);
     const actor = getActor(req);
+    authorizeTenant(actor, body.organizationId);
 
     const data = await withTransaction(async (client) => {
       const walletResult = await client.query(

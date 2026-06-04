@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import { withTransaction } from "../../db/transaction.js";
 import { requirePermission } from "../../shared/auth/auth.js";
-import { asyncHandler } from "../../shared/http/errors.js";
+import { asyncHandler, forbidden } from "../../shared/http/errors.js";
 
 export const demoRouter = Router();
 
@@ -402,6 +402,10 @@ async function findOrCreateStudents(client, organizationId) {
 }
 
 async function loadDemoData() {
+  if (process.env.DISABLE_DEMO_SEED === "true") {
+    throw forbidden("Demo seed endpoints are disabled in this environment");
+  }
+
   return withTransaction(async (client) => {
     const organization = await findOrCreateOrganization(client);
     const store = await findOrCreateStore(client, organization.id);

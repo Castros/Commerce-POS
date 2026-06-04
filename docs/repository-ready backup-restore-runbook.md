@@ -436,6 +436,95 @@ Planned upgrades:
 
 ---
 
+# Developer Cross-Machine Workflow
+
+## Why Copying the Project Folder Is Not Enough
+
+The database lives in a Docker named volume (`commerce_pos_postgres`), not inside the
+project directory. Copying or cloning the repo does not copy your data. Orders,
+wallets, customers, and all transactions stay on the machine where Docker created the
+volume.
+
+Volume location on the host:
+
+```text
+/var/lib/docker/volumes/commerce_pos_postgres/_data
+```
+
+---
+
+## Export Data from Your Current Machine
+
+Make sure the `db` container is running, then dump the database:
+
+```bash
+docker exec commerce_pos-db-1 pg_dump -U commerce_pos commerce_pos > ~/commerce_pos_backup.sql
+```
+
+If you are unsure of the container name:
+
+```bash
+docker ps --filter "ancestor=postgres:16-alpine"
+```
+
+Use the name shown in the `NAMES` column.
+
+---
+
+## Transfer the Dump to the Other Machine
+
+Any method works — AirDrop, USB drive, Google Drive, or scp:
+
+```bash
+# From Mac to Linux over the network
+scp ~/commerce_pos_backup.sql user@LINUX_IP:~/projects/commerce_pos/
+
+# From Linux to Mac over the network
+scp ~/projects/commerce_pos/commerce_pos_backup.sql user@MAC_IP:~/Desktop/
+```
+
+---
+
+## Import Data on the Target Machine
+
+1. Start only the database container:
+
+```bash
+docker compose up -d db
+```
+
+2. Wait a few seconds for it to be healthy, then restore:
+
+```bash
+cat ~/projects/commerce_pos/commerce_pos_backup.sql | \
+  docker exec -i commerce_pos-db-1 psql -U commerce_pos -d commerce_pos
+```
+
+3. Bring the full stack up:
+
+```bash
+docker compose up
+```
+
+Your orders, wallets, and all data will be available.
+
+---
+
+## Recommended Habit When Switching Machines
+
+Before stopping work on machine A:
+
+```bash
+docker exec commerce_pos-db-1 pg_dump -U commerce_pos commerce_pos > \
+  ~/projects/commerce_pos/local_dev_backup_$(date +%Y%m%d).sql
+```
+
+Keep that file inside the project directory so it travels with the repo (it is
+git-ignored by default since `.sql` dump files are not committed). Drop old dumps
+periodically to save disk space.
+
+---
+
 # Design Principles
 
 1. PostgreSQL is the source of truth

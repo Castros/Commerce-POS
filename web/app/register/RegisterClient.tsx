@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { apiGet, apiPost } from "../lib/api";
 import type {
@@ -11,13 +11,67 @@ import type {
   StudentAppSearchResult
 } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
+import { loadRegisterContext } from "../lib/organizationContext";
 import { CartPanel } from "./CartPanel";
 import { ProductCatalog } from "./ProductCatalog";
 import { StudentSelector } from "./StudentSelector";
 import { productCategory, toCents } from "./registerUtils";
-import type { CartLine, PaymentMethod } from "./types";
+import type { CartLine, PaymentMethod, RegisterSearchResult } from "./types";
+
+type StudentCredentialResolveResponse = {
+  credential: {
+    id: string;
+    credentialType: string;
+    credentialLabel: string | null;
+    active: boolean;
+  };
+  customer: Omit<DemoStudent, "wallet">;
+  wallet: DemoStudent["wallet"];
+};
+
+type SerialPortLike = {
+  open(options: { baudRate: number }): Promise<void>;
+  close(): Promise<void>;
+  readable: ReadableStream<BufferSource> | null;
+};
+
+type NavigatorWithSerial = Navigator & {
+  serial?: {
+    getPorts(): Promise<SerialPortLike[]>;
+    requestPort(): Promise<SerialPortLike>;
+  };
+};
+
+const NFC_READER_AUTO_CONNECT_KEY = "commerce_pos_nfc_reader_auto_connect";
+
+function credentialFromSerialLine(line: string) {
+  const normalized = line.trim();
+  if (!normalized) return null;
+
+  const [label, ...rest] = normalized.split(":");
+  const value = rest.join(":").trim();
+  const upperLabel = label.trim().toUpperCase();
+
+  if ((upperLabel === "TOKEN" || upperLabel === "CRED" || upperLabel === "CREDENTIAL") && value) {
+    return value;
+  }
+
+  if (upperLabel === "UID" && value) {
+    return value.replace(/\s+/g, "").toUpperCase();
+  }
+
+  if (normalized.startsWith("cred_")) {
+    return normalized;
+  }
+
+  return null;
+}
 
 export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | null }) {
+  const demoRef = useRef<DemoSchoolData | null>(initialDemo);
+  const serialPortRef = useRef<SerialPortLike | null>(null);
+  const serialReaderRef = useRef<ReadableStreamDefaultReader<BufferSource> | null>(null);
+  const serialStopRequestedRef = useRef(false);
   const [demo, setDemo] = useState<DemoSchoolData | null>(initialDemo);
   const [selectedStudentId, setSelectedStudentId] = useState<string>(
     initialDemo?.students[0]?.id || ""
@@ -30,20 +84,26 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
   const [selling, setSelling] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [studentSearch, setStudentSearch] = useState("");
-  const [studentSearchResults, setStudentSearchResults] = useState<StudentAppSearchResult[]>([]);
+  const [studentSearchResults, setStudentSearchResults] = useState<RegisterSearchResult[]>([]);
   const [searchingStudents, setSearchingStudents] = useState(false);
+  const [resolvingCredential, setResolvingCredential] = useState(false);
+  const [serialSupported, setSerialSupported] = useState(false);
+  const [serialConnecting, setSerialConnecting] = useState(false);
+  const [serialConnected, setSerialConnected] = useState(false);
+  const [serialMessage, setSerialMessage] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
-  async function loadDemo() {
+  async function loadRegisterData() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiPost<DemoSchoolData>("/demo/school", {});
+      const context = await loadRegisterContext();
+      const data: DemoSchoolData = { ...context, students: [] };
       setDemo({ ...data, students: [] });
       setSelectedStudentId("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load demo data");
+      setError(err instanceof Error ? err.message : "Could not load register data");
     } finally {
       setLoading(false);
     }
@@ -51,9 +111,37 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
 
   useEffect(() => {
     if (!initialDemo) {
-      void loadDemo();
+      void loadRegisterData();
     }
   }, [initialDemo]);
+
+  useEffect(() => {
+    demoRef.current = demo;
+  }, [demo]);
+
+  useEffect(() => {
+    setSerialSupported(
+      typeof navigator !== "undefined" && Boolean((navigator as NavigatorWithSerial).serial)
+    );
+
+    return () => {
+      serialStopRequestedRef.current = true;
+      void serialReaderRef.current?.cancel().catch(() => undefined);
+      void serialPortRef.current?.close().catch(() => undefined);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!serialSupported) return;
+    if (typeof window === "undefined") return;
+    if (window.localStorage.getItem(NFC_READER_AUTO_CONNECT_KEY) !== "true") return;
+
+    const timeout = window.setTimeout(() => {
+      void connectNfcReader(true);
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [serialSupported]);
 
   const selectedStudent = useMemo(
     () => demo?.students.find((student) => student.id === selectedStudentId) || null,
@@ -148,28 +236,95 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
     );
   }
 
-  async function searchStudentAppStudents() {
-    if (!demo || !studentSearch.trim()) return;
+  async function searchStudents(query = studentSearch) {
+    const currentDemo = demoRef.current;
+    const trimmed = query.trim();
+    if (!currentDemo || !trimmed) return;
 
     setSearchingStudents(true);
     setError(null);
     try {
       const params = new URLSearchParams({
-        q: studentSearch.trim()
+        q: trimmed
       });
 
-      const students = await apiGet<StudentAppSearchResult[]>(
-        `/integrations/student-app/students/search?${params}`
-      );
-      setStudentSearchResults(students);
-      if (students.length === 0) {
-        setError("No matching Student Educational app student found");
+      const [studentAppStudents, customers, wallets] = await Promise.all([
+        apiGet<StudentAppSearchResult[]>(`/integrations/student-app/students/search?${params}`),
+        apiGet<Omit<DemoStudent, "wallet">[]>(`/customers?organizationId=${currentDemo.organization.id}`),
+        apiGet<DemoStudent["wallet"][]>(`/wallets?organizationId=${currentDemo.organization.id}`)
+      ]);
+
+      const lower = trimmed.toLowerCase();
+      const posResults: RegisterSearchResult[] = customers
+        .filter((customer) =>
+          [customer.name || "", customer.externalId || "", customer.email || "", customer.phone || ""]
+            .some((value) => value.toLowerCase().includes(lower))
+        )
+        .map((customer) => ({
+          source: "pos",
+          id: customer.id,
+          name: customer.name || "Unnamed student",
+          externalId: customer.externalId,
+          email: customer.email,
+          classroomLabel: customer.email || "POS customer",
+          customer,
+          wallet: wallets.find((wallet) => wallet.customerId === customer.id) || null
+        }));
+
+      const studentAppResults: RegisterSearchResult[] = studentAppStudents.map((student) => ({
+        source: "student_app",
+        id: student.id,
+        name: student.name,
+        externalId: student.externalId,
+        email: student.schoolEmail,
+        classroomLabel: student.classroom?.name || student.preferredGrade || "Student app",
+        student
+      }));
+
+      const merged = [...posResults, ...studentAppResults];
+      setStudentSearchResults(merged);
+      if (merged.length === 0) {
+        setError("No matching student found");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not search Student app students");
+      setError(err instanceof Error ? err.message : "Could not search students");
     } finally {
       setSearchingStudents(false);
     }
+  }
+
+  useEffect(() => {
+    const query = studentSearch.trim();
+    if (query.length < 3) {
+      setStudentSearchResults([]);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void searchStudents(query);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [studentSearch]);
+
+  function selectPosStudent(result: Extract<RegisterSearchResult, { source: "pos" }>) {
+    if (!demo || !result.wallet) {
+      setError("This student does not have a wallet yet. Create a wallet from Customers first.");
+      return;
+    }
+
+    const linkedStudent: DemoStudent = {
+      ...result.customer,
+      wallet: result.wallet
+    };
+    setDemo({
+      ...demo,
+      students: [linkedStudent]
+    });
+    setSelectedStudentId(linkedStudent.id);
+    setStudentSearchResults([]);
+    setStudentSearch("");
+    setReceipt(null);
   }
 
   async function linkStudentAppStudent(studentResult: StudentAppSearchResult) {
@@ -195,10 +350,7 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
 
       setDemo({
         ...demo,
-        students: [
-          linkedStudent,
-          ...demo.students.filter((existing) => existing.id !== linkedStudent.id)
-        ]
+        students: [linkedStudent]
       });
       setSelectedStudentId(linkedStudent.id);
       setStudentSearchResults([]);
@@ -206,6 +358,120 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not link Student app student");
     }
+  }
+
+  async function selectSearchResult(result: RegisterSearchResult) {
+    if (result.source === "pos") {
+      selectPosStudent(result);
+      return;
+    }
+
+    await linkStudentAppStudent(result.student);
+  }
+
+  async function resolveCredential(credentialToken: string) {
+    const currentDemo = demoRef.current;
+    if (!currentDemo || resolvingCredential) return;
+
+    setResolvingCredential(true);
+    setError(null);
+    setSerialMessage("Reading NFC credential...");
+    try {
+      const result = await apiPost<StudentCredentialResolveResponse>("/student-credentials/resolve", {
+        organizationId: currentDemo.organization.id,
+        credentialToken
+      });
+
+      const linkedStudent: DemoStudent = {
+        ...result.customer,
+        wallet: result.wallet
+      };
+
+      setDemo({
+        ...currentDemo,
+        students: [linkedStudent]
+      });
+      setSelectedStudentId(linkedStudent.id);
+      setStudentSearch("");
+      setStudentSearchResults([]);
+      setReceipt(null);
+      setSerialMessage(`Selected ${linkedStudent.name || "student"} from NFC.`);
+    } catch (err) {
+      setSerialMessage(err instanceof Error ? err.message : "Could not resolve NFC credential");
+    } finally {
+      setResolvingCredential(false);
+    }
+  }
+
+  async function readSerialPort(port: SerialPortLike) {
+    if (!port.readable) {
+      throw new Error("NFC reader is not readable");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const reader = port.readable.getReader();
+    serialReaderRef.current = reader;
+
+    try {
+      while (!serialStopRequestedRef.current) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const credentialToken = credentialFromSerialLine(line);
+          if (credentialToken) {
+            await resolveCredential(credentialToken);
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  async function connectNfcReader(auto = false) {
+    if (serialConnecting || serialConnected) return;
+
+    const serial = (navigator as NavigatorWithSerial).serial;
+    if (!serial) {
+      setSerialMessage("Web Serial requires Chrome or Edge over HTTPS or localhost.");
+      return;
+    }
+
+    setSerialConnecting(true);
+    setSerialMessage(auto ? "Reconnecting NFC reader..." : "Choose the Arduino NFC reader.");
+    try {
+      const rememberedPorts = auto ? await serial.getPorts() : [];
+      const port = rememberedPorts[0] || (await serial.requestPort());
+
+      serialStopRequestedRef.current = false;
+      await port.open({ baudRate: 9600 });
+      serialPortRef.current = port;
+      setSerialConnected(true);
+      setSerialMessage("NFC reader connected. Tap a card or bracelet.");
+      window.localStorage.setItem(NFC_READER_AUTO_CONNECT_KEY, "true");
+      await readSerialPort(port);
+    } catch (err) {
+      if (!auto) {
+        setSerialMessage(err instanceof Error ? err.message : "Could not connect NFC reader");
+      }
+      setSerialConnected(false);
+    } finally {
+      setSerialConnecting(false);
+    }
+  }
+
+  function clearSelectedStudent() {
+    if (!demo) return;
+    setDemo({ ...demo, students: [] });
+    setSelectedStudentId("");
+    setStudentSearch("");
+    setStudentSearchResults([]);
+    setReceipt(null);
   }
 
   async function completeSale() {
@@ -296,23 +562,12 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
                     : "in_stock"
             };
           }),
-          students:
-            paymentMethod === "wallet" && selectedStudent && result.wallet
-              ? demo.students.map((student) =>
-            student.id === selectedStudent.id
-              ? {
-                  ...student,
-                  wallet: {
-                    ...student.wallet,
-                    balanceCents: result.wallet!.balanceCents,
-                    creditLimitCents: result.wallet!.creditLimitCents
-                  }
-                }
-              : student
-          )
-              : demo.students
+          students: []
         });
       }
+      setSelectedStudentId("");
+      setStudentSearch("");
+      setStudentSearchResults([]);
     } catch (err) {
       setCheckoutMessage(err instanceof Error ? err.message : "Sale failed");
     } finally {
@@ -321,9 +576,9 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
   }
 
   return (
-    <section className="module">
+    <section className="module registerModule">
       <PageHeader eyebrow="Cashier workflow" title="Cafeteria Register">
-        <button type="button" onClick={loadDemo} disabled={loading}>
+        <button type="button" onClick={loadRegisterData} disabled={loading}>
           {loading ? "Loading..." : "Reload products"}
         </button>
       </PageHeader>
@@ -370,16 +625,24 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
             studentSearch={studentSearch}
             searchResults={studentSearchResults}
             searchingStudents={searchingStudents}
+            serialSupported={serialSupported}
+            serialConnecting={serialConnecting || resolvingCredential}
+            serialConnected={serialConnected}
+            serialMessage={serialMessage}
             onSearchChange={setStudentSearch}
             onSearchSubmit={() => {
-              void searchStudentAppStudents();
+              void searchStudents();
             }}
             onStudentResultSelect={(student) => {
-              void linkStudentAppStudent(student);
+              void selectSearchResult(student);
             }}
             onStudentSelect={(studentId) => {
               setSelectedStudentId(studentId);
               setReceipt(null);
+            }}
+            onClearStudent={clearSelectedStudent}
+            onNfcConnect={() => {
+              void connectNfcReader();
             }}
           />
 

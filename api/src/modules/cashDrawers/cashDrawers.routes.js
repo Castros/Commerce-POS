@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
-import { getActor, requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, authorizeStore, getActor, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, conflict, notFound, parseZod } from "../../shared/http/errors.js";
 
 export const cashDrawersRouter = Router();
@@ -56,6 +56,7 @@ cashDrawersRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const query = parseZod(drawerQuerySchema, req.query);
+    authorizeTenant(req.actor, query.organizationId);
     const values = [query.organizationId];
     const clauses = ["organization_id = $1"];
 
@@ -101,6 +102,7 @@ cashDrawersRouter.get(
   "/current",
   asyncHandler(async (req, res) => {
     const query = parseZod(currentQuerySchema, req.query);
+    authorizeTenant(req.actor, query.organizationId);
     const result = await pool.query(
       `
         SELECT id,
@@ -135,6 +137,7 @@ cashDrawersRouter.post(
   asyncHandler(async (req, res) => {
     const body = parseZod(openDrawerSchema, req.body);
     const actor = getActor(req);
+    await authorizeStore(actor, body.organizationId, body.storeId);
 
     const result = await withTransaction(async (client) => {
       const store = await client.query(
@@ -229,6 +232,7 @@ cashDrawersRouter.post(
     const sessionId = z.string().uuid().parse(req.params.id);
     const body = parseZod(closeDrawerSchema, req.body);
     const actor = getActor(req);
+    authorizeTenant(actor, body.organizationId);
 
     const result = await withTransaction(async (client) => {
       const current = (

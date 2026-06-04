@@ -43,11 +43,13 @@ The backend already supports:
 - Paid cash/card sale through `POST /v1/orders/paid-sale`
 - Wallet credit-line support, including negative balances up to the configured limit
 - Inventory records, low-stock state, adjustments, and sale-driven stock decrement
+- Supplier records, receiving invoices, CSV inventory import review, receipt extraction drafts, and location transfers
 - Idempotency replay without double charging
 - Insufficient funds/credit-limit rejection
 - Immutable wallet ledger trigger
-- Basic auth/RBAC foundation
-- Demo school seed endpoint for cafeteria/student-wallet demos
+- Browser PIN login/session flow with cashier, manager, admin, and super-admin roles
+- Student NFC/card/bracelet credential issuance and register credential resolution
+- Demo school seed endpoint for local-only cafeteria/student-wallet demos, disabled in stage/prod
 - Order list/detail reads
 - Order receipt detail with line items, wallet impact, and inventory impact
 - Full-order refunds that reverse wallet payments, sale inventory movements, and open cash drawer expected cash
@@ -55,21 +57,23 @@ The backend already supports:
 - Student Educational app integration endpoints for student wallet lookup
 
 The web app now has route-level POS modules on `http://localhost:3100`.
-`/register` is the first working cashier demo route. It server-loads the demo
-school/store/product context, shows touch-friendly product image tiles with cafeteria
-category filters, does not preload fake students into the cashier flow, searches the
-Student Educational app by matricula/name/email through the POS API, and supports
-cash, credit/card, and wallet checkout. When a student is selected, the
-cashier UI shows only the student and a signed wallet balance: positive balances are
-shown green, negative balances are shown red, and credit-limit blocking is surfaced
-only when the sale would exceed the configured limit.
+`/register` is the first working cashier route. It loads the signed-in staff
+organization, assigned/first store, and that store's product catalog. It does not
+create demo data or preload fake students. Cashiers search POS customers, search the
+Student Educational app by matricula/name/email through the POS API, or connect a Web
+Serial NFC reader and tap a card/bracelet. Cash, credit/card, and wallet checkout are
+supported. When a student is selected, the cashier UI shows only the student and a
+signed wallet balance: positive balances are shown green, negative balances are shown
+red, and credit-limit blocking is surfaced only when the sale would exceed the
+configured limit.
 `/student-demo` shows the student/parent-facing balance and recent cafeteria
 transactions from the same Commerce POS backend.
 `/inventory` reads live inventory from the API, supports manager stock
 receiving/adjustments, and shows stock levels that change when the register completes
 paid or wallet sales.
-`/products` reads and edits live catalog data for the demo school, including product
-name, SKU, description, image URL, price, taxable state, and active/inactive state.
+`/products` reads and edits live catalog data for the current organization/store,
+including product name, SKU, description, image URL, price, taxable state, and
+active/inactive state.
 `/orders` supports clickable receipt lookup with line items, payment details, wallet
 balance-after, inventory decrement details, receipt reprint, and full-order refund.
 `/payments` now includes the cash drawer workflow for `Lunch Line 02`: open drawer,
@@ -103,6 +107,22 @@ Production writes require:
 ```text
 Authorization: Bearer $COMMERCE_API_TOKEN
 ```
+
+## Tenant-First Stage Rule
+
+Build and demo the system as one hosted POS serving multiple school organizations.
+Every school trial gets its own organization, one or more cafeteria/store locations,
+staff accounts, products/menus, inventory, students/customers, wallets, credentials,
+and settings.
+
+- Do not auto-create demo, seed, test, or placeholder records from normal UI routes.
+- Use `GET /v1/organizations?scope=mine` and the helpers in
+  `web/app/lib/organizationContext.ts` for normal staff/admin pages.
+- Use assigned stores for cashiers/managers where available.
+- Keep `/v1/demo/school` local-only and set `DISABLE_DEMO_SEED=true` in stage/prod.
+- Super admin can configure the organization and all stores; admins/managers/cashiers
+  must be scoped by role and store assignment.
+- Automated tests must run against a dedicated test database, never the shared stage DB.
 
 ## Verification Commands
 
@@ -152,43 +172,6 @@ for f in $(find api/src api/test -name '*.js' -print); do node --check "$f" || e
 - Write audit events in the same transaction as financial changes.
 - Do not mutate wallet ledger rows.
 
-## Module Pattern
-
-Backend modules should follow this shape:
-
-```text
-routes.js        HTTP parsing and response shape only
-schemas.js       zod validation when the module grows
-service.js       business rules and transaction orchestration
-repo.js          SQL only, always tenant-scoped
-events.js        audit/webhook event creation when needed
-```
-
-Current modules:
-
-```text
-organizations
-stores
-products
-customers
-wallets
-orders
-demo
-integrations/student-app
-```
-
-Expected next modules:
-
-```text
-auth
-inventory
-payments
-receipts
-reports
-integrations
-cashDrawers
-```
-
 ## Database Rules
 
 Migrations live in:
@@ -231,16 +214,120 @@ Read these before architecture or money-flow changes:
 - Do not split into microservices or add queues/Redis/Kubernetes until there is real need.
 - Do not put SQL directly into large route handlers for money flows.
 
+## Competitive Context
+
+The primary competitor in the Latin American private school market is **Paymon** (paymon.io).
+Read `docs/competitive-paymon.md` before designing new features — it contains confirmed
+pricing, feature inventory, and gap analysis from a real sales proposal (March 2026).
+
+**Pricing reference:** Paymon charges ~$6,700 MXN/month per school on a full school-year
+contract + 2.9% on card/transfer payments (passable to parents) + $2,800 MXN for a
+proprietary Android POS terminal. They are pre-breakeven at 110 schools.
+
+**Their moats to match:** parental controls (allergen blocking, product blocking, spending
+limits, pre-ordering, notifications), hardware diversity (NFC + QR + fingerprint).
+
+**Their gaps to exploit:** no US market, cashless-only, annual lock-in, no SIS
+integrations, no partial refunds, no multi-school group management, 2.9% passed to parents.
+
 ## Near-Term Direction
 
-The next build direction is:
+### Operator foundation (do first)
 
-1. Continue extracting register-specific components from `/register`.
-2. Add reports for daily sales, product sales, payment methods, and drawer variance.
-3. Add real user login/session flow.
-4. Add stronger store assignment enforcement for cashiers and managers.
-5. Add richer inventory history, receiving references, and supplier metadata.
-6. Add partial refunds, formal voids, and manager approval rules.
-7. Add printable receipt formatting.
-8. Harden Student Educational app service-token integration.
-9. Add production deployment docs and backup/restore runbook.
+1. Add real user login/session flow with staff creation UI.
+2. Enforce store assignment scoping for cashiers and managers at every endpoint.
+3. Add formal order void workflow and manager approval rules.
+4. Harden Student Educational app service-token integration.
+5. Add production deployment docs and backup/restore runbook.
+
+### Parental platform (next major product surface)
+
+These features are Paymon's deepest competitive moat. Build them as a dedicated
+`parents` module with its own auth layer (parents are not staff — separate credential
+and session model).
+
+6. **Parent wallet top-up** — parent-facing endpoint to add funds via card or bank
+   transfer. Idempotent, audited, emits wallet ledger row. Fee model is organization-
+   configured: school absorbs, or explicit disclosed fee — never silently passed through.
+7. **Purchase notifications** — email or webhook fired inside the same transaction as a
+   wallet sale. Parent receives: student name, item(s) bought, amount charged, balance after.
+8. **Spending controls** — `commerce_wallet_spending_rules` table: per-wallet rules for
+   daily max spend, per-day-of-week max, blocked product IDs, blocked category names.
+   POS enforces rules at sale time before charging wallet — same transaction, same
+   FOR UPDATE lock on wallet row.
+9. **Allergen registration** — `commerce_customer_allergens` table linking customer to
+   allergen codes. Products tagged with matching allergen codes are blocked at wallet
+   sale time; cashier sees a clear warning. Does not block cash/card sales (parent
+   consent model — wallet is the controlled payment method).
+10. **Parent purchase history** — read endpoint scoped to a parent credential, returning
+    wallet transactions with item snapshots. No new data — already in
+    `commerce_wallet_transactions` + `commerce_order_items`.
+11. **Pre-ordering** — `commerce_pre_orders` table: customer, store, date, items,
+    status (pending → fulfilled → cancelled). Cashier marks pickup at register.
+    Pre-orders decrement inventory at fulfilment, not at creation.
+12. **Meal subscriptions** — recurring wallet top-up schedule: amount, frequency
+    (weekly/monthly), active flag. Background job or cron fires top-up and emails parent.
+
+### Full-school payments (expansion wedge — same strategy Paymon is executing)
+
+13. Event ticketing and fee collection.
+14. Marketplace module (uniforms, books, supplies).
+15. Transport and extracurricular fee billing.
+
+### Compliance features
+
+16. **Operator allergen tagging** — `allergens` array on `commerce_products`. Linked to
+    parental allergen blocks in #9. Visible in register tile tooltip.
+17. **Dietary restriction enforcement** — warn or block at POS when student has a
+    restriction that matches a cart item. Manager-override PIN to bypass.
+
+### Positioning features (directly against Paymon)
+
+18. **Fee transparency config** — `fee_model` on organization: `school_absorbs` or
+    `disclosed_to_parent`. When `disclosed_to_parent`, top-up endpoint returns the fee
+    amount explicitly and requires client acknowledgement before charging.
+19. **Multi-school group dashboard** — super admin view aggregating revenue, active
+    students, and drawer status across all organizations. School chains need this.
+20. **Hardware integration docs** — document NFC wristband, NFC card, QR code, fingerprint,
+    and username/PIN as supported student identification methods. None require proprietary
+    terminals; all use the existing `student-credentials` resolution endpoint.
+
+## Module Pattern
+
+Backend modules should follow this shape:
+
+```text
+routes.js        HTTP parsing and response shape only
+schemas.js       zod validation when the module grows
+service.js       business rules and transaction orchestration
+repo.js          SQL only, always tenant-scoped
+events.js        audit/webhook event creation when needed
+```
+
+Current modules:
+
+```text
+organizations
+stores
+products
+customers
+wallets
+orders
+demo
+integrations/student-app
+```
+
+Expected next modules:
+
+```text
+auth
+inventory
+payments
+receipts
+reports
+integrations
+cashDrawers
+parents          ← new: parental controls, top-ups, notifications, pre-orders
+subscriptions    ← new: recurring wallet top-up plans
+events           ← new: ticketing, fees, marketplace
+```

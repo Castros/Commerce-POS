@@ -3,6 +3,11 @@ export type Organization = {
   name: string;
   type: string;
   externalSchoolId: string | null;
+  active?: boolean;
+  currency?: string;
+  taxEnabled?: boolean;
+  taxRateBps?: number;
+  createdAt?: string;
 };
 
 export type Store = {
@@ -186,6 +191,7 @@ export type OrderDetail = {
     name: string;
     unitPriceCents: number | string;
     quantity: number;
+    refundedQuantity: number;
     lineTotalCents: number | string;
     currency: string;
     createdAt: string;
@@ -239,4 +245,93 @@ export type RefundReceipt = {
     quantityDelta: number;
     quantityAfter: number;
   }>;
+};
+
+export type Supplier = {
+  id: string;
+  organizationId: string;
+  name: string;
+  contactName: string | null;
+  phone: string | null;
+  email: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  country: string;
+  vendorNumber: string | null;
+  notes: string | null;
+  active: boolean;
+  createdAt: string;
+};
+
+export type InventoryInvoice = {
+  id: string;
+  organizationId: string;
+  storeId: string;
+  storeName: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  receivedDate: string | null;
+  subtotalCents: number | string;
+  taxCents: number | string;
+  totalCents: number | string;
+  status: string;
+  source: string;
+  attachmentUrl: string | null;
+  notes: string | null;
+  approvedAt: string | null;
+  createdAt: string;
+  lineCount: number;
+};
+
+export type InventoryImportBatch = {
+  id: string;
+  organizationId: string;
+  storeId: string | null;
+  storeName: string | null;
+  filename: string | null;
+  status: string;
+  totalRows: number;
+  validRows: number;
+  errorRows: number;
+  createdAt: string;
+  approvedAt: string | null;
+  appliedAt: string | null;
+};
+
+export type ReceiptExtractionDraft = {
+  id: string;
+  organizationId: string;
+  storeId: string | null;
+  storeName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  status: string;
+  imageUrl: string | null;
+  confidence: number | string | null;
+  extractedPayload: Record<string, unknown>;
+  reviewNotes: string | null;
+  createdInvoiceId: string | null;
+  createdAt: string;
+  approvedAt: string | null;
+};
+
+export type InventoryTransfer = {
+  id: string;
+  organizationId: string;
+  productId: string;
+  productName: string;
+  fromStoreId: string;
+  fromStoreName: string;
+  toStoreId: string;
+  toStoreName: string;
+  quantity: number;
+  status: string;
+  note: string | null;
+  createdAt: string;
+  completedAt: string | null;
 };

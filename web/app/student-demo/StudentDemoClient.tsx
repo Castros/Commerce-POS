@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet } from "../lib/api";
 import type { DemoSchoolData, DemoStudent } from "../lib/demoTypes";
 import { formatMoney, shortId } from "../lib/format";
+import { loadRegisterContext } from "../lib/organizationContext";
 
 type WalletTransaction = {
   id: string;
@@ -30,18 +31,21 @@ export function StudentDemoClient({ initialDemo }: { initialDemo: DemoSchoolData
   const purchaseCount = transactions.filter((transaction) => transaction.type === "purchase").length;
   const owedCents = Math.max(0, -Number(selected?.wallet.balanceCents || 0));
 
-  async function loadDemo() {
+  async function loadStudentPreview() {
     try {
       setError(null);
-      const data = await apiPost<DemoSchoolData>("/demo/school", {});
-      const wallets = await apiGet<DemoStudent["wallet"][]>(
-        `/wallets?organizationId=${data.organization.id}`
+      const context = await loadRegisterContext();
+      const customers = await apiGet<Omit<DemoStudent, "wallet">[]>(
+        `/customers?organizationId=${context.organization.id}`
       );
-      const students = data.students.map((student) => ({
-        ...student,
-        wallet: wallets.find((wallet) => wallet.customerId === student.id) || student.wallet
-      }));
-      setDemo({ ...data, students });
+      const wallets = await apiGet<DemoStudent["wallet"][]>(
+        `/wallets?organizationId=${context.organization.id}`
+      );
+      const students = customers.flatMap((customer) => {
+        const wallet = wallets.find((item) => item.customerId === customer.id);
+        return wallet ? [{ ...customer, wallet }] : [];
+      });
+      setDemo({ ...context, students });
       setSelectedId(students[0]?.id || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load student app preview");
@@ -66,7 +70,7 @@ export function StudentDemoClient({ initialDemo }: { initialDemo: DemoSchoolData
 
   useEffect(() => {
     if (!initialDemo) {
-      void loadDemo();
+      void loadStudentPreview();
     }
   }, [initialDemo]);
 
@@ -77,14 +81,14 @@ export function StudentDemoClient({ initialDemo }: { initialDemo: DemoSchoolData
   return (
     <section className="module studentAppShell">
       <PageHeader eyebrow="Student educational app" title="Synced Wallet & Purchase History">
-        <button type="button" onClick={loadDemo}>Refresh</button>
+        <button type="button" onClick={loadStudentPreview}>Refresh</button>
       </PageHeader>
       {error ? <p className="demoError">{error}</p> : null}
 
       <div className="studentPreviewGrid">
         <aside className="studentPhone">
           <div className="studentPhoneTop">
-            <span>Demo Academy</span>
+            <span>{demo?.organization.name || "Organization"}</span>
             <strong>{selected?.name || "Student"}</strong>
           </div>
           <div className="walletHero">
