@@ -39,10 +39,11 @@ const createStaffSchema = z.object({
 });
 
 const updateStaffSchema = z.object({
-  name: z.string().min(1).max(200).optional(),
-  email: z.string().email().nullable().optional(),
-  role: z.enum(["organization_admin", "store_manager", "cashier", "accountant"]).optional(),
-  active: z.boolean().optional()
+  name:             z.string().min(1).max(200).optional(),
+  email:            z.string().email().nullable().optional(),
+  role:             z.enum(["organization_admin", "store_manager", "cashier", "accountant"]).optional(),
+  active:           z.boolean().optional(),
+  avatarPublicId:   z.string().nullable().optional(),
 });
 
 const setPinSchema = z.object({
@@ -159,10 +160,11 @@ staffRouter.patch(
     const vals = [];
     let i = 1;
 
-    if (body.name !== undefined) { cols.push(`name = $${i++}`); vals.push(body.name); }
-    if (body.email !== undefined) { cols.push(`email = $${i++}`); vals.push(body.email); }
-    if (body.role !== undefined) { cols.push(`role = $${i++}`); vals.push(body.role); }
-    if (body.active !== undefined) { cols.push(`active = $${i++}`); vals.push(body.active); }
+    if (body.name           !== undefined) { cols.push(`name = $${i++}`);             vals.push(body.name); }
+    if (body.email          !== undefined) { cols.push(`email = $${i++}`);            vals.push(body.email); }
+    if (body.role           !== undefined) { cols.push(`role = $${i++}`);             vals.push(body.role); }
+    if (body.active         !== undefined) { cols.push(`active = $${i++}`);           vals.push(body.active); }
+    if (body.avatarPublicId !== undefined) { cols.push(`avatar_public_id = $${i++}`); vals.push(body.avatarPublicId); }
 
     if (cols.length === 0) {
       return res.json({ data: existing });
@@ -174,7 +176,8 @@ staffRouter.patch(
         UPDATE commerce_users SET ${cols.join(", ")}
         WHERE id = $${i}
         RETURNING id, organization_id AS "organizationId", name, email, role, active,
-                  pin_last4 AS "pinLast4", pin_set_at AS "pinSetAt", created_at AS "createdAt"
+                  pin_last4 AS "pinLast4", pin_set_at AS "pinSetAt", created_at AS "createdAt",
+                  avatar_public_id AS "avatarPublicId"
       `,
       vals
     );

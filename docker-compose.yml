@@ -28,6 +28,13 @@ services:
       COMMERCE_API_TOKEN: ${COMMERCE_API_TOKEN:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3100}
       DISABLE_DEMO_SEED: ${DISABLE_DEMO_SEED:-false}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-secret-change-in-prod}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      APP_URL: ${APP_URL:-http://localhost:3100}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "${API_PORT:-4100}:4100"
     extra_hosts:
@@ -46,6 +53,7 @@ services:
     environment:
       API_URL: http://api:4100
       PORT: ${WEB_PORT:-3100}
+      NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
     ports:
       - "${WEB_PORT:-3100}:3100"
     volumes:

@@ -3,11 +3,41 @@
 import { useEffect, useMemo, useState } from "react";
 import { DataTable } from "../components/DataTable";
 import { PageHeader } from "../components/PageHeader";
-import { apiGet } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import type { Store } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
 import { loadCurrentOrganization } from "../lib/organizationContext";
 import type { ReportSummary } from "./reportsTypes";
+
+type AiSummaryOutput = {
+  summaryText?: string;
+  keyMetrics?: Record<string, string>;
+  topProducts?: { name: string; unitsSold: number }[];
+  flags?: { type: string; message: string }[];
+  severity?: "low" | "medium" | "high";
+};
+
+type AiAlertOutput = {
+  alertType: string;
+  headline: string;
+  body: string;
+  severity: "low" | "medium" | "high";
+};
+
+type AiRecord = {
+  id: string;
+  organizationId: string;
+  storeId: string | null;
+  sourceType: "closeout_summary" | "anomaly_alert";
+  sourceRecordId: string | null;
+  modelName: string;
+  status: "pending" | "draft" | "reviewed" | "dismissed" | "error";
+  outputJson: AiSummaryOutput | AiAlertOutput[] | null;
+  errorMessage?: string;
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+};
 
 type DatePreset = "today" | "week" | "month" | "custom";
 
@@ -92,6 +122,11 @@ export function ReportsClient() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
+  const [summaries, setSummaries] = useState<AiRecord[]>([]);
+  const [alerts, setAlerts] = useState<AiRecord[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+
   async function loadReport(orgId = organizationId) {
     setLoading(true);
     setError(null);
@@ -103,6 +138,7 @@ export function ReportsClient() {
         setOrganizationId(org.id);
         const storeList = await apiGet<Store[]>(`/stores?organizationId=${org.id}`);
         setStores(storeList);
+        void loadAiData(org.id);
       }
 
       const params = new URLSearchParams({
@@ -120,6 +156,57 @@ export function ReportsClient() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadAiData(orgId: string) {
+    setAiLoading(true);
+    try {
+      const [summaryList, alertList] = await Promise.all([
+        apiGet<AiRecord[]>(`/ai/summaries?organizationId=${orgId}&limit=5`),
+        apiGet<AiRecord[]>(`/ai/alerts?organizationId=${orgId}&status=draft&limit=10`)
+      ]);
+      setSummaries(summaryList);
+      setAlerts(alertList);
+    } catch {
+      // AI features are optional — don't block the main reports view
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function runAnomalyScan() {
+    if (!organizationId) return;
+    setScanning(true);
+    try {
+      await apiPost("/ai/alerts/scan", { organizationId });
+      await loadAiData(organizationId);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function reviewSummary(id: string) {
+    if (!organizationId) return;
+    await apiPatch(`/ai/summaries/${id}`, { organizationId, status: "reviewed" });
+    setSummaries((prev) => prev.map((s) => (s.id === id ? { ...s, status: "reviewed" as const } : s)));
+  }
+
+  async function dismissSummary(id: string) {
+    if (!organizationId) return;
+    await apiPatch(`/ai/summaries/${id}`, { organizationId, status: "dismissed" });
+    setSummaries((prev) => prev.filter((s) => s.id !== id));
+  }
+
+  async function reviewAlert(id: string) {
+    if (!organizationId) return;
+    await apiPatch(`/ai/alerts/${id}`, { organizationId, status: "reviewed" });
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  async function dismissAlert(id: string) {
+    if (!organizationId) return;
+    await apiPatch(`/ai/alerts/${id}`, { organizationId, status: "dismissed" });
+    setAlerts((prev) => prev.filter((a) => a.id !== id));
   }
 
   useEffect(() => {
@@ -155,6 +242,124 @@ export function ReportsClient() {
       </PageHeader>
 
       {error ? <p className="demoError">{error}</p> : null}
+
+      {/* ── AI Anomaly Alerts ─────────────────────────────────────────── */}
+      <div className="aiSection">
+        <div className="aiSectionHeader">
+          <h3>
+            <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--amber)" }}>warning</span>
+            AI Anomaly Alerts
+          </h3>
+          <div className="aiScanRow">
+            {alerts.length > 0 && (
+              <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+                {alerts.length} active alert{alerts.length !== 1 ? "s" : ""}
+              </span>
+            )}
+            <button type="button" onClick={() => void runAnomalyScan()} disabled={scanning || !organizationId}>
+              {scanning ? "Scanning..." : "Scan now"}
+            </button>
+          </div>
+        </div>
+
+        {aiLoading ? (
+          <p className="aiEmptyState">Loading AI data...</p>
+        ) : alerts.length === 0 ? (
+          <div className="aiEmptyState">
+            <strong>No active alerts</strong>
+            Run a scan to check for unusual refund patterns, drawer variances, and inventory anomalies.
+          </div>
+        ) : (
+          <div className="aiAlertCards">
+            {alerts.map((alert) => {
+              const items = Array.isArray(alert.outputJson) ? (alert.outputJson as AiAlertOutput[]) : [];
+              return items.map((item, i) => (
+                <div key={`${alert.id}-${i}`} className={`aiAlertCard aiAlertCard--${item.severity || "medium"}`}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <h4>{item.headline}</h4>
+                    <span className={`aiSeverityBadge aiSeverityBadge--${item.severity || "medium"}`}>
+                      {item.severity || "medium"}
+                    </span>
+                  </div>
+                  <p>{item.body}</p>
+                  <div className="aiAlertCardActions">
+                    <button type="button" onClick={() => void reviewAlert(alert.id)}>Mark reviewed</button>
+                    <button type="button" onClick={() => void dismissAlert(alert.id)}>Dismiss</button>
+                  </div>
+                </div>
+              ));
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── AI Closeout Summaries ─────────────────────────────────────── */}
+      <div className="aiSection">
+        <div className="aiSectionHeader">
+          <h3>
+            <span className="material-symbols-outlined" style={{ fontSize: 16, color: "var(--primary)" }}>auto_awesome</span>
+            AI Closeout Summaries
+          </h3>
+          <span style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
+            Generated automatically after each drawer close
+          </span>
+        </div>
+
+        {aiLoading ? (
+          <p className="aiEmptyState">Loading AI data...</p>
+        ) : summaries.length === 0 ? (
+          <div className="aiEmptyState">
+            <strong>No summaries yet</strong>
+            Summaries are generated automatically when a cashier closes their cash drawer. Add your{" "}
+            <code>ANTHROPIC_API_KEY</code> to enable this feature.
+          </div>
+        ) : (
+          summaries.map((summary) => {
+            const out = summary.outputJson as AiSummaryOutput | null;
+            return (
+              <div key={summary.id} className="aiSummaryCard">
+                <div className="aiSummaryMeta">
+                  <strong>{shortDate(summary.createdAt)}</strong>
+                  <span className={`aiStatusBadge aiStatusBadge--${summary.status}`}>{summary.status}</span>
+                  {out?.severity && (
+                    <span className={`aiSeverityBadge aiSeverityBadge--${out.severity}`}>{out.severity}</span>
+                  )}
+                  <small>{summary.modelName}</small>
+                </div>
+
+                {summary.status === "error" ? (
+                  <p style={{ color: "var(--red)", margin: 0, fontSize: "0.88rem" }}>
+                    Generation failed: {summary.errorMessage}
+                  </p>
+                ) : out?.summaryText ? (
+                  <p className="aiSummaryText">{out.summaryText}</p>
+                ) : (
+                  <p style={{ color: "var(--muted)", margin: 0, fontSize: "0.88rem" }}>Generating...</p>
+                )}
+
+                {(out?.flags || []).length > 0 && (
+                  <div className="aiSummaryFlags">
+                    {(out?.flags || []).map((flag, i) => (
+                      <span key={i} className="aiFlag">{flag.message}</span>
+                    ))}
+                  </div>
+                )}
+
+                {summary.status === "draft" && (
+                  <div className="aiSummaryActions">
+                    <button type="button" onClick={() => void reviewSummary(summary.id)}>
+                      Mark reviewed
+                    </button>
+                    <button type="button" onClick={() => void dismissSummary(summary.id)}>
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
 
       <div className="toolbar reportFilters">
         <button type="button" className={preset === "today" ? "active" : ""} onClick={() => applyPreset("today")}>

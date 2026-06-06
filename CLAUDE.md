@@ -32,15 +32,22 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 │   │   │   ├── transaction.js
 │   │   │   └── migrations/
 │   │   ├── modules/
-│   │   │   ├── organizations/
-│   │   │   ├── stores/
-│   │   │   ├── products/
+│   │   │   ├── ai/              ← closeout summaries + anomaly alerts
+│   │   │   ├── cashDrawers/
 │   │   │   ├── customers/
-│   │   │   ├── wallets/
-│   │   │   ├── orders/
 │   │   │   ├── demo/
-│   │   │   └── integrations/
+│   │   │   ├── integrations/
+│   │   │   ├── inventory/
+│   │   │   ├── orders/
+│   │   │   ├── organizations/
+│   │   │   ├── products/
+│   │   │   ├── reports/
+│   │   │   ├── staff/
+│   │   │   ├── stores/
+│   │   │   ├── studentCredentials/
+│   │   │   └── wallets/
 │   │   └── shared/
+│   │       ├── ai/              ← Anthropic SDK client, prompt builders
 │   │       ├── audit/
 │   │       ├── auth/
 │   │       ├── http/
@@ -49,52 +56,65 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 ├── web/
 │   └── app/
 ├── docs/
+│   ├── ai-feature-strategy.md
+│   ├── competitive-paymon.md
+│   ├── deployment.md
+│   └── sso-strategy.md
+├── .do/app.yaml                 ← DigitalOcean App Platform spec
+├── .github/workflows/
+│   ├── ci.yml                   ← syntax check + web build on all branches
+│   └── deploy.yml               ← auto-deploy to DO on main push
 ├── commerce-pos-service.md
 └── docker-compose.yml
 ```
 
 ## Current Status
 
-The first working backend model exists.
-
 Implemented:
 
-- Express API scaffold
-- Next.js web scaffold
-- Postgres migrations
-- Migration advisory lock
-- Request IDs
-- Health and readiness endpoints
-- Core commerce schema
-- Financial schema hardening
-- Browser PIN login/session flow with role-based actors
+**Backend**
+- Express API scaffold with health/readiness endpoints, request IDs, rate limiting
+- Postgres migrations with advisory lock
+- Core commerce schema + financial schema hardening
+- Browser PIN login/session flow with cashier, manager, admin, super-admin roles
 - Organization, store, product, customer, wallet endpoints
 - Product image URL field for register/catalog display
 - Wallet top-up endpoint
 - Atomic wallet-sale endpoint
 - Paid cash/card sale endpoint
 - Wallet credit-line support with negative balances allowed only up to the configured limit
-- Inventory table, adjustment endpoint, low-stock API state, and sale-driven stock decrement
+- Inventory table, adjustment endpoint, low-stock API state, sale-driven stock decrement
+- Inventory receiving workflows, CSV import review, location transfers
 - Cash drawer sessions with open/current/list/close endpoints and cash-sale tracking
 - Order list/detail endpoints
-- Demo school seed endpoint for local-only setup
+- Full-order refund and partial refund endpoints
 - Student Educational app integration endpoints
-- Idempotency helper
-- Audit helper
-- Immutable wallet transaction trigger
+- Student credential issuance, resolution, and revocation
+- Idempotency helper, audit helper, immutable wallet transaction trigger
 - API integration tests
-- Docker-first dev workflow for API and web
+- **AI module** — Daily Closeout Summary + Anomaly Alerts (see AI section below)
+
+**Infrastructure**
+- Docker-first dev workflow (api + web + postgres)
+- Multi-stage production Dockerfiles for api and web
+- DigitalOcean App Platform spec at `.do/app.yaml` (~$25/month)
+- GitHub Actions CI (`ci.yml`) — syntax check + web build on all branches
+- GitHub Actions deploy (`deploy.yml`) — auto-deploy to DO on push to main
+- Production deployment runbook at `docs/deployment.md`
+
+**Frontend**
 - Route-level modular POS frontend
-- Cashier register with live product image tiles, category filters, stock badges, POS customer search, Student app search, NFC reader selection, cash/card/wallet checkout, receipt, and signed student wallet balance
+- Cashier register with live product tiles, category filters, stock badges, POS customer search, Student app search, NFC reader, cash/card/wallet checkout, receipt, signed student wallet balance
 - Register UI split into POS-specific components under `web/app/register/`
-- Live Products admin route for creating/updating catalog items used by the register
-- Live inventory route backed by the Commerce POS API, including manager stock receiving/adjustments
-- Orders route with clickable receipt detail, line items, wallet impact, and inventory impact
-- Full-order refund endpoint and Orders UI action, reversing wallet balance, sale inventory movements, and open cash drawer expected cash
+- Live Products admin route (create/update catalog items)
+- Live inventory route with manager stock receiving/adjustments
+- Orders route with receipt detail, line items, wallet impact, inventory impact, full and partial refunds
 - Payments route with cash drawer open/close and expected-vs-counted variance
+- Settings route — live org profile form (name, type, currency, tax settings) + stores list
+- Organizations route — full CRUD for platform-level org management
+- Reports route with AI Closeout Summaries and AI Anomaly Alerts sections
 - Student app preview route for balance and POS transaction history
-- Student Educational app API bridge for `/student/cafeteria` and `/parents/students/:studentId/cafeteria`
-- Stitch design project for POS frontend exploration
+- Print CSS for 72mm receipt printing
 
 Current live local URLs:
 
@@ -191,34 +211,79 @@ sale-decremented inventory, refunds wallet payments back to the student wallet, 
 reverses open cash drawer expected cash for cash sales. Cash refunds are rejected
 after the drawer is closed.
 
-Current demo and integration endpoints:
+Current endpoints:
 
 ```text
-POST /v1/demo/school   # local only; disabled in stage/prod
-GET  /v1/demo/school   # local only; disabled in stage/prod
-GET  /v1/auth/me
+# Auth
 POST /v1/auth/login
 POST /v1/auth/logout
-GET  /v1/cash-drawers?organizationId=...
-GET  /v1/cash-drawers/current?organizationId=...&storeId=...&registerName=...
-POST /v1/cash-drawers/open
-POST /v1/cash-drawers/:id/close
-GET  /v1/inventory?organizationId=...&storeId=...
-POST /v1/inventory/:productId/adjustments
+GET  /v1/auth/me
+
+# Demo (local only)
+POST /v1/demo/school
+GET  /v1/demo/school
+
+# Organizations
+GET  /v1/organizations
+POST /v1/organizations
+PATCH /v1/organizations/:id
+
+# Stores
+GET  /v1/stores?organizationId=...
+POST /v1/stores
+
+# Products
 GET  /v1/products?organizationId=...&storeId=...&includeInactive=true
 POST /v1/products
 PATCH /v1/products/:id
+
+# Customers & Wallets
+GET  /v1/customers?organizationId=...
+POST /v1/customers
+GET  /v1/wallets/:id?organizationId=...
+POST /v1/wallets/:id/top-up
+
+# Orders
+POST /v1/orders/wallet-sale
 POST /v1/orders/paid-sale
 POST /v1/orders/:id/refund
+POST /v1/orders/:id/partial-refund
+GET  /v1/orders?organizationId=...
+GET  /v1/orders/:id?organizationId=...
+
+# Cash Drawers
+GET  /v1/cash-drawers?organizationId=...
+GET  /v1/cash-drawers/current?organizationId=...&storeId=...&registerName=...
+POST /v1/cash-drawers/open
+POST /v1/cash-drawers/:id/close   ← also triggers AI closeout summary async
+
+# Inventory
+GET  /v1/inventory?organizationId=...&storeId=...
+POST /v1/inventory/:productId/adjustments
+
+# Student Credentials
 GET  /v1/student-credentials?organizationId=...
 POST /v1/student-credentials/issue
 POST /v1/student-credentials/resolve
 POST /v1/student-credentials/:credentialId/revoke
+
+# Student App Integration
 GET  /v1/integrations/student-app/students/search?q=...
 POST /v1/integrations/student-app/students
 GET  /v1/integrations/student-app/students/:externalStudentId/cafeteria
-GET  /v1/orders?organizationId=...
-GET  /v1/orders/:id?organizationId=...
+
+# AI Features
+GET  /v1/ai/summaries?organizationId=...&storeId=...&status=...
+GET  /v1/ai/summaries/:id?organizationId=...
+POST /v1/ai/summaries                         ← manually trigger for a drawer session
+PATCH /v1/ai/summaries/:id                    ← mark reviewed / dismissed
+GET  /v1/ai/alerts?organizationId=...&status=...
+GET  /v1/ai/alerts/:id?organizationId=...
+POST /v1/ai/alerts/scan                       ← run anomaly rules + generate alerts
+PATCH /v1/ai/alerts/:id                       ← mark reviewed / dismissed
+
+# Reports
+GET  /v1/reports/summary?organizationId=...&dateFrom=...&dateTo=...
 ```
 
 The Student Educational app now calls the integration route from its cafeteria views.
@@ -275,16 +340,25 @@ Follow these exactly:
 
 ## Database Notes
 
-Migrations:
+Migrations applied in order:
 
 ```text
 001_core_schema.sql
 002_harden_financial_schema.sql
 003_auth_rbac_foundation.sql
 004_wallet_credit_lines.sql
+005_customer_external_id.sql
 006_inventory_foundation.sql
 007_cash_drawer_sessions.sql
 008_product_image_url.sql
+009_super_admin_role.sql
+010_inventory_receiving_workflows.sql
+011_inventory_transfers_and_import_apply.sql
+012_student_credentials.sql
+013_browser_auth_sessions.sql
+013_currency_and_tax_settings.sql   ← same prefix as above, applied after
+014_partial_refunds.sql
+015_ai_records.sql                   ← commerce_ai_records table for AI drafts/alerts
 ```
 
 The database now includes:
@@ -296,12 +370,16 @@ The database now includes:
 - Immutable wallet transaction triggers
 - Auth/RBAC foundation tables
 - Wallet credit limits and negative-balance checks
-- Inventory items and immutable inventory movement history
+- Inventory items, movements, receiving, and transfers
 - Cash drawer sessions/events for register closeout
 - Product image URLs for POS tile/catalog display
-- Audit metadata
+- Student credentials (NFC, QR, PIN issuance and resolution)
+- Browser session auth
+- Currency and tax settings per organization
+- Partial refund tracking on order items
+- AI draft/alert records (tenant-scoped, never touched by financial writes)
 
-Do not edit already-applied migrations casually. Add a new numbered migration for schema changes.
+Do not edit already-applied migrations. Add a new numbered migration for schema changes.
 
 ## Frontend Direction
 
@@ -383,25 +461,75 @@ cd web && npm run build
 
 ## Known Gaps
 
-- No real user login/session UI yet.
-- Register subcomponents exist; next extraction should split smaller tile/cart line/payment controls when behavior grows.
-- Most non-register pages still use demo/static data, but Products, Inventory, Orders, Payments, Customers, Student Demo, and Register have live API-backed slices.
-- Store assignment enforcement is not complete.
-- Inventory receiving/manager UI is basic but functional; it can adjust stock and sales decrement stock.
-- Cash drawer sessions are basic but functional.
-- Partial refunds are implemented; formal void workflows and manager-approval rules are not yet implemented.
-- Card checkout/refund is recorded as a payment method only; no card provider or terminal integration yet.
-- Student app integration exists, but still needs service-token hardening and production webhook/event design.
-- No production deployment/runbook docs yet.
-- No CI pipeline yet.
-- No parental controls layer (spending limits, product blocking, allergen flags, purchase notifications).
-- No parent-facing wallet top-up flow (parents currently cannot add funds without staff involvement).
-- No pre-ordering (parents reserving meals in advance for pickup).
-- No meal subscription / recurring wallet top-up plans.
-- No full-school payments beyond cafeteria (tuition, transport, events, marketplace).
-- No loyalty or gamification mechanics for students.
-- No offline-mode POS capability for unreliable WiFi environments.
-- No nutrition compliance tools (USDA meal patterns, calorie tracking, allergen disclosure for operators).
+**Auth / Access**
+- No staff creation/management UI yet (staff must be created via API or demo seed).
+- Store assignment enforcement is incomplete — cashier/manager endpoints don't yet reject cross-store requests.
+- No formal order void workflow or manager approval rules.
+
+**AI Features**
+- AI features require `ANTHROPIC_API_KEY` in `.env` — without it, the API will log a startup warning but the endpoints return empty results gracefully.
+- Anomaly detection runs on-demand (`POST /v1/ai/alerts/scan`) or must be scheduled externally. No pg-boss cron wired yet.
+- When installing `@anthropic-ai/sdk` on a fresh dev container, run `docker compose exec api npm install @anthropic-ai/sdk` after rebuilding the image, since the anonymous volume preserves the old node_modules.
+
+**Register / POS**
+- Demo seed (`GET /v1/demo/school`) creates products but currently no stores — register will show an empty catalog for the demo org until a store is created and products are assigned to it.
+- Card checkout is recorded as a payment method only; no card provider or terminal integration yet.
+
+**Payments / Finance**
+- Stripe wallet top-up not yet integrated (Stripe Mexico supports MXN, OXXO, SPEI).
+- No parent-facing wallet top-up flow.
+
+**Parental platform** (next major product surface)
+- No spending controls, allergen blocking, or product category blocking at POS.
+- No parent purchase notifications (email/webhook).
+- No pre-ordering or meal subscriptions.
+
+**Full-school payments**
+- No event ticketing, marketplace module, or transport/fee billing.
+
+**Other**
+- No offline-mode POS capability.
+- No nutrition/allergen compliance tools.
+- No multi-school group dashboard.
+
+## AI Features
+
+The AI system is implemented and live. Read `docs/ai-feature-strategy.md` for the full
+product strategy, pitch sequence, and marketing rationale.
+
+### What is built
+
+- **Daily Closeout Summary** — triggered automatically (fire-and-forget) when
+  `POST /v1/cash-drawers/:id/close` commits. Aggregates 6 SQL queries into a facts
+  object, hashes it, calls Claude Haiku 3.5, stores the result in `commerce_ai_records`.
+  Cost: ~$0.00073 per summary.
+
+- **Anomaly Alerts** — on-demand scan via `POST /v1/ai/alerts/scan`. Runs 4 SQL rules
+  (high refund rate per cashier, drawer variance >$10, outlier wallet top-ups, unaccounted
+  inventory drops). LLM is only called when at least one rule fires. Results stored in
+  `commerce_ai_records`.
+
+- **Reports UI** — `/reports` page shows both sections: AI Anomaly Alerts (with severity
+  badges and dismiss/review actions) and AI Closeout Summaries (prose paragraph with flags).
+
+### Architecture rules (follow exactly)
+
+- AI outputs are stored in `commerce_ai_records` only. AI never writes to financial tables.
+- Aggregation is always deterministic SQL first. AI only summarizes pre-computed facts.
+- The drawer close transaction must not be blocked by AI generation. Use `setImmediate`.
+- Dedup by `input_hash` — if the same drawer session is summarized twice with unchanged
+  facts, return the cached record without calling the API again.
+- Every AI record is scoped by `organization_id`. Never query across tenants.
+- Status lifecycle: `pending → draft → reviewed` or `dismissed`. Managers review; they
+  never auto-apply AI output to financial records.
+
+### Required environment variable
+
+```text
+ANTHROPIC_API_KEY=sk-ant-...   # from console.anthropic.com
+```
+
+Add to `.env` locally and set as a secret in the DO dashboard for production.
 
 ## Competitive Context
 
@@ -426,11 +554,12 @@ parental controls layer that matches or exceeds Paymon's.
 
 Immediate next steps (operator foundation):
 
-1. Add real auth/session flow with staff creation UI.
-2. Enforce store assignments for cashier/store-manager roles.
+1. Add staff creation/management UI (name, PIN, role, store assignments).
+2. Enforce store assignments for cashier/store-manager roles at every endpoint.
 3. Add formal void workflow and manager approval rules.
 4. Harden Student Educational app service-token integration.
-5. Add production deployment and backup/restore docs.
+5. ~~Add production deployment and backup/restore docs.~~ **Done** — see `docs/deployment.md`.
+6. Fix demo seed to create stores so the register works for the Demo Academy org.
 
 Parental platform (next major product surface — competes directly with Paymon's parent app):
 

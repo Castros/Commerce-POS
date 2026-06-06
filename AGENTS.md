@@ -29,55 +29,44 @@ Keep wallet, order, and payment writes inside one API/database transaction. Do n
 
 ## Current Working Model
 
-The backend already supports:
+**Backend — all implemented:**
 
-- Create organization
-- Create store
-- Create product
-- Product image URL support for register/catalog tiles
-- Product create/update admin flow for register catalog items
-- Create customer
-- Create wallet
-- Top up wallet
-- Atomic wallet sale through `POST /v1/orders/wallet-sale`
-- Paid cash/card sale through `POST /v1/orders/paid-sale`
-- Wallet credit-line support, including negative balances up to the configured limit
-- Inventory records, low-stock state, adjustments, and sale-driven stock decrement
-- Supplier records, receiving invoices, CSV inventory import review, receipt extraction drafts, and location transfers
-- Idempotency replay without double charging
-- Insufficient funds/credit-limit rejection
-- Immutable wallet ledger trigger
-- Browser PIN login/session flow with cashier, manager, admin, and super-admin roles
-- Student NFC/card/bracelet credential issuance and register credential resolution
-- Demo school seed endpoint for local-only cafeteria/student-wallet demos, disabled in stage/prod
-- Order list/detail reads
-- Order receipt detail with line items, wallet impact, and inventory impact
-- Full-order refunds that reverse wallet payments, sale inventory movements, and open cash drawer expected cash
-- Cash drawer sessions for opening, recording cash sales, and closeout variance
-- Student Educational app integration endpoints for student wallet lookup
+- Organizations, stores, products, customers, wallets CRUD
+- Atomic wallet sale, paid cash/card sale, wallet credit-line enforcement
+- Full-order and partial-order refunds
+- Inventory management: records, adjustments, receiving workflows, location transfers
+- Cash drawer sessions: open, track cash sales, close with variance calculation
+- Student credentials: NFC/card/PIN issuance and register resolution
+- Student Educational app integration
+- Browser PIN login/session flow (cashier, manager, admin, super-admin roles)
+- Idempotency, audit events, immutable wallet ledger trigger
+- **AI module**: Daily Closeout Summary and Anomaly Alerts (`/v1/ai/*`)
+  - Uses Claude Haiku 3.5 via `@anthropic-ai/sdk`
+  - Results stored in `commerce_ai_records` — AI never writes to financial tables
+  - Requires `ANTHROPIC_API_KEY` env var
 
-The web app now has route-level POS modules on `http://localhost:3100`.
-`/register` is the first working cashier route. It loads the signed-in staff
-organization, assigned/first store, and that store's product catalog. It does not
-create demo data or preload fake students. Cashiers search POS customers, search the
-Student Educational app by matricula/name/email through the POS API, or connect a Web
-Serial NFC reader and tap a card/bracelet. Cash, credit/card, and wallet checkout are
-supported. When a student is selected, the cashier UI shows only the student and a
-signed wallet balance: positive balances are shown green, negative balances are shown
-red, and credit-limit blocking is surfaced only when the sale would exceed the
-configured limit.
-`/student-demo` shows the student/parent-facing balance and recent cafeteria
-transactions from the same Commerce POS backend.
-`/inventory` reads live inventory from the API, supports manager stock
-receiving/adjustments, and shows stock levels that change when the register completes
-paid or wallet sales.
-`/products` reads and edits live catalog data for the current organization/store,
-including product name, SKU, description, image URL, price, taxable state, and
-active/inactive state.
-`/orders` supports clickable receipt lookup with line items, payment details, wallet
-balance-after, inventory decrement details, receipt reprint, and full-order refund.
-`/payments` now includes the cash drawer workflow for `Lunch Line 02`: open drawer,
-cash sales attach automatically, and closeout shows counted-vs-expected variance.
+**Infrastructure — all in place:**
+
+- Docker Compose dev stack (api + web + postgres)
+- Multi-stage production Dockerfiles
+- DigitalOcean App Platform spec at `.do/app.yaml` (~$25/month)
+- GitHub Actions CI (`ci.yml`) — syntax check + web build on all branches
+- GitHub Actions deploy (`deploy.yml`) — auto-deploy on push to `main`
+- Deployment runbook at `docs/deployment.md`
+
+**Frontend — live routes:**
+
+- `/register` — cashier POS with product tiles, NFC, cash/card/wallet checkout, receipt print
+- `/products` — live catalog CRUD
+- `/inventory` — live inventory with receiving/adjustments
+- `/orders` — receipt detail, full + partial refunds
+- `/payments` — cash drawer open/close with variance
+- `/customers` — customer list
+- `/settings` — live org profile (name, type, currency, tax) + stores list
+- `/organizations` — platform-level org CRUD (super admin)
+- `/reports` — sales analytics + **AI Closeout Summaries** + **AI Anomaly Alerts**
+- `/student-demo` — student/parent balance and transaction history
+- `/staff` — staff list (creation UI not yet complete)
 
 ## Local Development
 
@@ -213,6 +202,9 @@ Read these before architecture or money-flow changes:
 - Do not create unpaid-order plus pay-order flows until the full order state machine is designed.
 - Do not split into microservices or add queues/Redis/Kubernetes until there is real need.
 - Do not put SQL directly into large route handlers for money flows.
+- **Do not let AI write to financial tables.** AI outputs go to `commerce_ai_records` only. The pattern is: SQL aggregation → facts object → AI summary → human review → existing API if action needed.
+- Do not call the LLM from inside a financial transaction. Enqueue async after the transaction commits.
+- Do not ask the LLM to calculate financial totals from raw rows. Always pass pre-computed cents values.
 
 ## Competitive Context
 
@@ -234,11 +226,12 @@ integrations, no partial refunds, no multi-school group management, 2.9% passed 
 
 ### Operator foundation (do first)
 
-1. Add real user login/session flow with staff creation UI.
+1. Add staff creation/management UI — name, PIN, role, store assignment.
 2. Enforce store assignment scoping for cashiers and managers at every endpoint.
 3. Add formal order void workflow and manager approval rules.
 4. Harden Student Educational app service-token integration.
-5. Add production deployment docs and backup/restore runbook.
+5. ~~Add production deployment docs and backup/restore runbook.~~ **Done** — `docs/deployment.md`, `.do/app.yaml`, GitHub Actions.
+6. Fix demo seed to create stores so the Demo Academy register works out of the box.
 
 ### Parental platform (next major product surface)
 
@@ -307,27 +300,37 @@ events.js        audit/webhook event creation when needed
 Current modules:
 
 ```text
-organizations
-stores
-products
+ai               ← closeout summaries + anomaly alerts
+auth
+cashDrawers
 customers
-wallets
-orders
 demo
 integrations/student-app
+inventory
+orders
+organizations
+products
+reports
+staff
+stores
+studentCredentials
+wallets
+```
+
+Shared utilities:
+
+```text
+shared/ai/       ← Anthropic SDK client, prompt builders, input hash helper
+shared/audit/
+shared/auth/
+shared/http/
+shared/idempotency/
 ```
 
 Expected next modules:
 
 ```text
-auth
-inventory
-payments
-receipts
-reports
-integrations
-cashDrawers
-parents          ← new: parental controls, top-ups, notifications, pre-orders
-subscriptions    ← new: recurring wallet top-up plans
-events           ← new: ticketing, fees, marketplace
+parents          ← parental controls, top-ups, notifications, pre-orders
+subscriptions    ← recurring wallet top-up plans
+events           ← ticketing, fees, marketplace
 ```

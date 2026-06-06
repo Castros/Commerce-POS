@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../lib/api";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
 type CurrentSession = {
   user: {
@@ -14,27 +15,46 @@ type CurrentSession = {
   };
 };
 
-const navItems = [
-  ["Dashboard", "/dashboard", "dashboard", "All"],
-  ["Register", "/register", "point_of_sale", "Cashier"],
-  ["Orders", "/orders", "receipt_long", "Cashier"],
-  ["Inventory", "/inventory", "inventory_2", "Manager"],
-  ["Products", "/products", "restaurant_menu", "Manager"],
-  ["Customers", "/customers", "school", "Cashier"],
-  ["Student App", "/student-demo", "account_child", "Family"],
-  ["Reports", "/reports", "monitoring", "Admin"],
-  ["Organizations", "/organizations", "corporate_fare", "Platform"],
-  ["Staff", "/staff", "badge", "Admin"],
-  ["Settings", "/settings", "settings", "Admin"]
+const NAV_ITEMS = [
+  { key: "nav.dashboard",     href: "/dashboard",     icon: "dashboard",       role: "All" },
+  { key: "nav.register",      href: "/register",      icon: "point_of_sale",   role: "Cashier" },
+  { key: "nav.orders",        href: "/orders",        icon: "receipt_long",    role: "Cashier" },
+  { key: "nav.inventory",     href: "/inventory",     icon: "inventory_2",     role: "Manager" },
+  { key: "nav.products",      href: "/products",      icon: "restaurant_menu", role: "Manager" },
+  { key: "nav.customers",     href: "/customers",     icon: "school",          role: "Cashier" },
+  { key: "nav.guardians",     href: "/guardians",     icon: "family_restroom", role: "Manager" },
+  { key: "nav.employees",     href: "/employees",     icon: "badge",           role: "Manager" },
+  { key: "nav.payroll",       href: "/payroll",       icon: "payments",        role: "Admin" },
+  { key: "nav.studentApp",    href: "/student-demo",  icon: "account_child",   role: "Family" },
+  { key: "nav.reports",       href: "/reports",       icon: "monitoring",      role: "Admin" },
+  { key: "nav.organizations", href: "/organizations", icon: "corporate_fare",  role: "Platform" },
+  { key: "nav.staff",         href: "/staff",         icon: "person_pin",      role: "Admin" },
+  { key: "nav.settings",      href: "/settings",      icon: "settings",        role: "Admin" }
 ] as const;
 
 const SIDEBAR_KEY = "commerce_pos_sidebar_collapsed";
 const publicPaths = new Set(["/login", "/register-login"]);
 const workspaceRoles = new Set(["super_admin", "organization_admin", "store_manager", "admin", "manager"]);
 
+function LangToggle() {
+  const { lang, setLang } = useLanguage();
+  return (
+    <button
+      type="button"
+      className="langToggle"
+      title="Switch language / Cambiar idioma"
+      onClick={() => setLang(lang === "es" ? "en" : "es")}
+    >
+      <span className="material-symbols-outlined" aria-hidden="true">translate</span>
+      <span>{lang === "es" ? "EN" : "ES"}</span>
+    </button>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { t, lang } = useLanguage();
   const [collapsed, setCollapsed] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [session, setSession] = useState<CurrentSession | null>(null);
@@ -46,31 +66,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (publicPaths.has(pathname)) {
-      return;
-    }
-
+    if (publicPaths.has(pathname)) return;
     let cancelled = false;
     apiGet<CurrentSession>("/auth/me")
-      .then((currentSession) => {
-        if (!cancelled) {
-          setSession(currentSession);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          router.replace(`/login?next=${encodeURIComponent(pathname)}`);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
+      .then((s) => { if (!cancelled) setSession(s); })
+      .catch(() => { if (!cancelled) router.replace(`/login?next=${encodeURIComponent(pathname)}`); });
+    return () => { cancelled = true; };
   }, [pathname, router]);
 
   function toggleSidebar() {
-    setCollapsed((current) => {
-      const next = !current;
+    setCollapsed((cur) => {
+      const next = !cur;
       window.localStorage.setItem(SIDEBAR_KEY, String(next));
       return next;
     });
@@ -85,9 +91,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }
 
-  if (publicPaths.has(pathname)) {
-    return <>{children}</>;
-  }
+  if (publicPaths.has(pathname)) return <>{children}</>;
+
+  // Parent portal has its own layout — skip AppShell entirely
+  if (pathname.startsWith("/parent")) return <>{children}</>;
 
   if (isRegisterPath) {
     return (
@@ -95,55 +102,42 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="registerTopbar">
           <Link className="registerBrand" href="/register">
             <span className="brandMark">
-              <span className="material-symbols-outlined fill" aria-hidden="true">
-                local_cafe
-              </span>
+              <span className="material-symbols-outlined fill" aria-hidden="true">local_cafe</span>
             </span>
             <div>
               <strong>Commerce POS</strong>
-              <span>Cafeteria register</span>
+              <span>{t("shell.cafeteriaRegister")}</span>
             </div>
           </Link>
           <nav className="registerTerminalNav" aria-label="Register tools">
             <Link className={pathname === "/register" ? "active" : ""} href="/register">
-              <span className="material-symbols-outlined" aria-hidden="true">
-                point_of_sale
-              </span>
-              Register
+              <span className="material-symbols-outlined" aria-hidden="true">point_of_sale</span>
+              {t("nav.register")}
             </Link>
             <Link className={pathname === "/register/orders" ? "active" : ""} href="/register/orders">
-              <span className="material-symbols-outlined" aria-hidden="true">
-                receipt_long
-              </span>
-              Orders / Refunds
+              <span className="material-symbols-outlined" aria-hidden="true">receipt_long</span>
+              {t("shell.ordersRefunds")}
             </Link>
-            <Link
-              className={pathname === "/register/customers" ? "active" : ""}
-              href="/register/customers"
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">
-                person_add
-              </span>
-              Add Customer
+            <Link className={pathname === "/register/customers" ? "active" : ""} href="/register/customers">
+              <span className="material-symbols-outlined" aria-hidden="true">person_add</span>
+              {t("shell.addCustomer")}
             </Link>
           </nav>
           <div className="registerTopbarMeta">
-            <span>Main Store</span>
-            <strong>Terminal 01</strong>
-            <span className="sync">Online</span>
+            {session?.user.organizationName && (
+              <strong>{session.user.organizationName}</strong>
+            )}
+            <span className="sync">{t("shell.online")}</span>
           </div>
           <div className="registerSession">
-            <span>{session?.user.name || session?.user.email || "Cashier session"}</span>
+            <span>{session?.user.name || session?.user.email || t("shell.cashierSession")}</span>
             {canAccessWorkspace ? (
-              <Link className="workspaceLink" href="/dashboard">
-                Admin Workspace
-              </Link>
+              <Link className="workspaceLink" href="/dashboard">{t("shell.adminWorkspace")}</Link>
             ) : null}
+            <LangToggle />
             <button type="button" onClick={logout} disabled={loggingOut}>
-              <span className="material-symbols-outlined" aria-hidden="true">
-                lock
-              </span>
-              {loggingOut ? "Locking" : "Lock Register"}
+              <span className="material-symbols-outlined" aria-hidden="true">lock</span>
+              {loggingOut ? t("shell.locking") : t("shell.lockRegister")}
             </button>
           </div>
         </header>
@@ -158,20 +152,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="sidebarHeader">
           <Link className="brand" href="/dashboard">
             <span className="brandMark">
-              <span className="material-symbols-outlined fill" aria-hidden="true">
-                local_cafe
-              </span>
+              <span className="material-symbols-outlined fill" aria-hidden="true">local_cafe</span>
             </span>
             <div>
               <strong>Commerce POS</strong>
-              <span>Organization workspace</span>
+              <span>{t("shell.orgWorkspace")}</span>
             </div>
           </Link>
           <button
             type="button"
             className="sidebarToggle"
-            aria-label={collapsed ? "Open sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Open sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? t("shell.openSidebar") : t("shell.collapseSidebar")}
+            title={collapsed ? t("shell.openSidebar") : t("shell.collapseSidebar")}
             onClick={toggleSidebar}
           >
             <span className="material-symbols-outlined" aria-hidden="true">
@@ -181,15 +173,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="navList" aria-label="Primary navigation">
-          {navItems.map(([item, href, icon, role]) => (
-            <Link href={href} key={item} className={pathname === href ? "active" : ""} title={item}>
+          {NAV_ITEMS.map(({ key, href, icon, role }) => (
+            <Link href={href} key={href} className={pathname === href ? "active" : ""} title={t(key)}>
               <span className="navIcon">
-                <span className="material-symbols-outlined" aria-hidden="true">
-                  {icon}
-                </span>
+                <span className="material-symbols-outlined" aria-hidden="true">{icon}</span>
               </span>
               <span className="navText">
-                {item}
+                {t(key)}
                 <small>{role}</small>
               </span>
             </Link>
@@ -197,17 +187,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="sidebarFooter">
-          <button type="button" title="Support">
-            <span className="material-symbols-outlined" aria-hidden="true">
-              help
-            </span>
-            <span>Support</span>
+          <LangToggle />
+          <button type="button" title={t("shell.support")}>
+            <span className="material-symbols-outlined" aria-hidden="true">help</span>
+            <span>{t("shell.support")}</span>
           </button>
-          <button type="button" onClick={logout} disabled={loggingOut} title="Sign out">
-            <span className="material-symbols-outlined" aria-hidden="true">
-              logout
-            </span>
-            <span>{loggingOut ? "Signing out" : "Sign out"}</span>
+          <button type="button" onClick={logout} disabled={loggingOut} title={t("shell.signOut")}>
+            <span className="material-symbols-outlined" aria-hidden="true">logout</span>
+            <span>{loggingOut ? t("shell.signingOut") : t("shell.signOut")}</span>
           </button>
         </div>
       </aside>
@@ -215,21 +202,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="workspace">
         <header className="topbar">
           <div className="selectors">
-            <span className="topbarOrg">{session?.user.organizationName ?? "Organization"}</span>
-            <span className="sync">Online</span>
+            <span className="topbarOrg">{session?.user.organizationName ?? t("common.organization")}</span>
+            <span className="sync">{t("shell.online")}</span>
           </div>
           <label className="globalSearch">
-            <span className="material-symbols-outlined" aria-hidden="true">
-              search
-            </span>
-            <input placeholder="Receipt, product, student, SKU" />
+            <span className="material-symbols-outlined" aria-hidden="true">search</span>
+            <input placeholder={t("shell.searchPlaceholder")} />
           </label>
           <div className="userMenu">
-            <span>Staff session</span>
-            <button type="button" onClick={logout} title="Sign out" disabled={loggingOut}>
-              <span className="material-symbols-outlined" aria-hidden="true">
-                logout
-              </span>
+            <span>{t("shell.staffSession")}</span>
+            <button type="button" onClick={logout} title={t("shell.signOut")} disabled={loggingOut}>
+              <span className="material-symbols-outlined" aria-hidden="true">logout</span>
             </button>
           </div>
         </header>

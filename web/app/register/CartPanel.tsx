@@ -1,7 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import type { DemoStudent, Receipt } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
+import { avatarUrl } from "../lib/imageUrl";
 import type { CartLine, PaymentMethod } from "./types";
 import { ReceiptPreview } from "./ReceiptPreview";
 import { toCents } from "./registerUtils";
@@ -43,19 +45,28 @@ export function CartPanel({
 }: CartPanelProps) {
   return (
     <>
-      <div className="studentCard">
-        <span>Selected student</span>
-        <h3>{selectedStudent?.name || "No student selected"}</h3>
-        {selectedStudent ? (
+      {selectedStudent && (
+        <div className="studentCard">
+          {selectedStudent.avatarPublicId && (
+            <Image
+              src={avatarUrl.sm(selectedStudent.avatarPublicId)}
+              alt={selectedStudent.name ?? "student"}
+              width={48}
+              height={48}
+              style={{ borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+              unoptimized={false}
+            />
+          )}
+          <h3>{selectedStudent.name}</h3>
           <strong className={selectedBalanceCents < 0 ? "negativeBalance" : "positiveBalance"}>
             {selectedBalanceCents > 0 ? "+" : ""}
             {formatMoney(selectedBalanceCents)}
           </strong>
-        ) : null}
-        {selectedStudent && walletStatus === "Blocked" ? (
-          <p className="walletWarning">Blocked: over credit limit by {formatMoney(creditExceededCents)}.</p>
-        ) : null}
-      </div>
+          {walletStatus === "Blocked" && (
+            <p className="walletWarning">Over credit limit by {formatMoney(creditExceededCents)}.</p>
+          )}
+        </div>
+      )}
 
       <div className="cartLines">
         {cart.length === 0 ? <p className="emptyState">Add products to start a sale.</p> : null}
@@ -80,9 +91,6 @@ export function CartPanel({
       </div>
 
       <div className="totals">
-        <span>Subtotal <strong>{formatMoney(subtotalCents)}</strong></span>
-        <span>Tax <strong>{formatMoney(0)}</strong></span>
-        <span>Discount <strong>{formatMoney(0)}</strong></span>
         <span className="grandTotal">Total <strong>{formatMoney(subtotalCents)}</strong></span>
       </div>
 
@@ -111,7 +119,6 @@ export function CartPanel({
         >
           Wallet
         </button>
-        <button type="button" disabled>Split later</button>
       </div>
 
       <button

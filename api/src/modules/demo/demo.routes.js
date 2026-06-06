@@ -3,6 +3,7 @@ import { Router } from "express";
 import { withTransaction } from "../../db/transaction.js";
 import { requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, forbidden } from "../../shared/http/errors.js";
+import { hashPin } from "../../shared/auth/browserAuth.js";
 
 export const demoRouter = Router();
 
@@ -84,6 +85,7 @@ const demoStudents = [
     name: "Maya Johnson",
     email: "parent.maya@example.test",
     phone: "555-0101",
+    familyCode: "FAM-001",
     targetBalanceCents: 2500
   },
   {
@@ -92,6 +94,7 @@ const demoStudents = [
     name: "Ethan Smith",
     email: "parent.ethan@example.test",
     phone: "555-0102",
+    familyCode: "FAM-002",
     targetBalanceCents: 1500
   },
   {
@@ -100,8 +103,21 @@ const demoStudents = [
     name: "Sophia Chen",
     email: "parent.sophia@example.test",
     phone: "555-0103",
+    familyCode: "FAM-003",
     targetBalanceCents: 3000
   }
+];
+
+const demoStaff = [
+  { name: "Demo Admin",     email: "admin@demo.test",   role: "organization_admin", pin: "0000" },
+  { name: "Maria Lopez",    email: "manager@demo.test", role: "store_manager",      pin: "1111" },
+  { name: "Carlos Rivera",  email: "cashier@demo.test", role: "cashier",            pin: "2222" }
+];
+
+const demoGuardians = [
+  { name: "Sarah Johnson",   email: "parent.maya@example.test",   phone: "555-0101", familyCode: "FAM-001" },
+  { name: "David Smith",     email: "parent.ethan@example.test",  phone: "555-0102", familyCode: "FAM-002" },
+  { name: "Mei-Ling Chen",   email: "parent.sophia@example.test", phone: "555-0103", familyCode: "FAM-003" }
 ];
 
 async function findOrCreateOrganization(client) {
@@ -293,6 +309,58 @@ async function seedProductInventory(client, organizationId, storeId, products) {
   return seeded;
 }
 
+async function findOrCreateStaff(client, organizationId, storeId) {
+  const created = [];
+  for (const member of demoStaff) {
+    const existing = await client.query(
+      `SELECT id FROM commerce_users WHERE organization_id = $1 AND email = $2 LIMIT 1`,
+      [organizationId, member.email]
+    );
+    if (existing.rows[0]) { created.push(existing.rows[0]); continue; }
+
+    const { salt, hash } = await hashPin(member.pin);
+    const pinLast4 = member.pin.slice(-4);
+    const user = await client.query(
+      `INSERT INTO commerce_users
+         (organization_id, name, email, role, pin_hash, pin_salt, pin_last4, pin_set_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       RETURNING id`,
+      [organizationId, member.name, member.email, member.role, hash, salt, pinLast4]
+    );
+    if (storeId && member.role !== "organization_admin") {
+      await client.query(
+        `INSERT INTO commerce_user_store_assignments (organization_id, user_id, store_id)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [organizationId, user.rows[0].id, storeId]
+      );
+    }
+    created.push(user.rows[0]);
+  }
+  return created;
+}
+
+async function findOrCreateGuardians(client, organizationId) {
+  for (const guardian of demoGuardians) {
+    const g = await client.query(
+      `INSERT INTO commerce_guardians (organization_id, name, email, phone, family_code)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (organization_id, email) DO UPDATE
+         SET family_code = COALESCE(EXCLUDED.family_code, commerce_guardians.family_code)
+       RETURNING id`,
+      [organizationId, guardian.name, guardian.email, guardian.phone, guardian.familyCode]
+    );
+    // Link students sharing the same family_code
+    await client.query(
+      `INSERT INTO commerce_guardian_students (guardian_id, student_id, organization_id, relationship)
+       SELECT $1, c.id, $2, 'guardian'
+       FROM commerce_customers c
+       WHERE c.organization_id = $2 AND c.family_code = $3
+       ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+      [g.rows[0].id, organizationId, guardian.familyCode]
+    );
+  }
+}
+
 async function findOrCreateStudents(client, organizationId) {
   const students = [];
 
@@ -322,9 +390,10 @@ async function findOrCreateStudents(client, organizationId) {
               external_parent_id,
               name,
               email,
-              phone
+              phone,
+              family_code
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING id, organization_id AS "organizationId",
                       external_student_id AS "externalStudentId",
                       external_parent_id AS "externalParentId",
@@ -336,10 +405,20 @@ async function findOrCreateStudents(client, organizationId) {
             student.externalParentId,
             student.name,
             student.email,
-            student.phone
+            student.phone,
+            student.familyCode
           ]
         )
       ).rows[0];
+
+    // Ensure family_code is set on existing rows
+    if (existingCustomer.rows[0] && student.familyCode) {
+      await client.query(
+        `UPDATE commerce_customers SET family_code = $1
+         WHERE id = $2 AND family_code IS NULL`,
+        [student.familyCode, customer.id]
+      );
+    }
 
     const wallet = (
       await client.query(
@@ -411,12 +490,15 @@ async function loadDemoData() {
     const store = await findOrCreateStore(client, organization.id);
     const products = await findOrCreateProducts(client, organization.id, store.id);
     const students = await findOrCreateStudents(client, organization.id);
+    const staff = await findOrCreateStaff(client, organization.id, store.id);
+    await findOrCreateGuardians(client, organization.id);
 
     return {
       organization,
       store,
       products,
-      students
+      students,
+      staffCount: staff.length
     };
   });
 }

@@ -1,6 +1,20 @@
 import { apiGet } from "./api";
 import type { Organization, Product, Store } from "./demoTypes";
 
+const REGISTER_STORE_KEY = "commerce_pos_register_store";
+
+export function saveRegisterStore(store: Store) {
+  try {
+    localStorage.setItem(REGISTER_STORE_KEY, JSON.stringify({ id: store.id, name: store.name }));
+  } catch {}
+}
+
+export function clearRegisterStore() {
+  try {
+    localStorage.removeItem(REGISTER_STORE_KEY);
+  } catch {}
+}
+
 type CurrentSession = {
   user: {
     id: string;
@@ -38,6 +52,17 @@ export async function loadCurrentStore(organizationId: string): Promise<Store> {
     apiGet<Store[]>(`/stores?organizationId=${organizationId}`),
     loadCurrentSession().catch(() => null)
   ]);
+
+  // Prefer the store explicitly selected at register login
+  try {
+    const saved = localStorage.getItem(REGISTER_STORE_KEY);
+    if (saved) {
+      const { id } = JSON.parse(saved) as { id: string };
+      const found = stores.find((s) => s.id === id);
+      if (found) return found;
+    }
+  } catch {}
+
   const assignedStoreId = session?.user.storeIds[0];
   const store = stores.find((item) => item.id === assignedStoreId) || stores[0];
 

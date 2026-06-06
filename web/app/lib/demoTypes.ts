@@ -55,6 +55,7 @@ export type DemoStudent = {
   email: string | null;
   phone: string | null;
   active: boolean;
+  avatarPublicId?: string | null;
   wallet: Wallet;
 };
 

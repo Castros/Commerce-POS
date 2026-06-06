@@ -45,6 +45,9 @@ services:
       - key: SENTRY_DSN
         scope: RUN_TIME
         type: SECRET
+      - key: ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
 
   - name: web
     source_dir: web

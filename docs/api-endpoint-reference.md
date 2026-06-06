@@ -1,3 +1,4 @@
+
 # Commerce POS API Endpoint Reference
 
 This document lists the current Commerce POS HTTP endpoints, what each endpoint does, the authorization required, example curl commands, and how to use the API from Postman.

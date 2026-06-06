@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
+import AvatarUpload from "../components/AvatarUpload";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { loadCurrentOrganization } from "../lib/organizationContext";
 import type { Store } from "../lib/demoTypes";
@@ -18,6 +19,7 @@ type StaffMember = {
   pinSetAt: string | null;
   createdAt: string;
   storeIds: string[];
+  avatarPublicId?: string | null;
 };
 
 type FormState = {
@@ -327,6 +329,21 @@ export function StaffClient() {
         <div className="staffPanelOverlay" onClick={closePanel}>
           <div className="staffPanel" onClick={(e) => e.stopPropagation()}>
             <div className="staffPanelHeader">
+              {panel === "edit" && editTarget && organizationId && (
+                <AvatarUpload
+                  publicId={editTarget.avatarPublicId}
+                  entityType="staff"
+                  entityId={editTarget.id}
+                  organizationId={organizationId}
+                  size={48}
+                  onUploaded={(pid) => {
+                    setStaff((prev) =>
+                      prev.map((s) => s.id === editTarget.id ? { ...s, avatarPublicId: pid } : s)
+                    );
+                    setEditTarget((t) => t ? { ...t, avatarPublicId: pid } : t);
+                  }}
+                />
+              )}
               <h2>
                 {panel === "create" ? "Add staff member" : panel === "pin" ? "Set PIN" : `Edit — ${editTarget?.name || ""}`}
               </h2>

@@ -528,7 +528,7 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
                 storeId: demo.store.id,
                 customerId: selectedStudent?.id || null,
                 paymentMethod,
-                registerName: "Lunch Line 02",
+                registerName: demo.store.name,
                 items: saleItems
               },
               { "Idempotency-Key": createIdempotencyKey() }
@@ -582,24 +582,6 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
           {loading ? "Loading..." : "Reload products"}
         </button>
       </PageHeader>
-
-      <div className="permissionStrip">
-        <div>
-          <span>Signed in employee</span>
-          <strong>Jordan Lee - Cashier</strong>
-          <small>Allowed: sell inventory, search students, take cash/card/wallet payments.</small>
-        </div>
-        <div>
-          <span>Admin permissions</span>
-          <strong>Locked</strong>
-          <small>Inventory edits, staff roles, tax settings, and register setup require manager/admin.</small>
-        </div>
-        <div>
-          <span>Register</span>
-          <strong>Lunch Line 02</strong>
-          <small>Cafeteria mode for school meal service.</small>
-        </div>
-      </div>
 
       {error ? (
         <p className="demoError" role="alert">

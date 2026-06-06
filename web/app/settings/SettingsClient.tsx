@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
+import AvatarUpload from "../components/AvatarUpload";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import type { Organization, Store } from "../lib/demoTypes";
 import { loadCurrentOrganization } from "../lib/organizationContext";
@@ -238,9 +239,26 @@ export function SettingsClient() {
           ) : (
             <ul className="activityList">
               {stores.map((store) => (
-                <li key={store.id}>
-                  <strong>{store.name}</strong>
-                  <small style={{ marginLeft: 8, color: "var(--muted)" }}>{store.type}</small>
+                <li key={store.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  {org && (
+                    <AvatarUpload
+                      publicId={(store as Store & { imagePublicId?: string }).imagePublicId}
+                      entityType="store"
+                      entityId={store.id}
+                      organizationId={org.id}
+                      size={40}
+                      shape="square"
+                      onUploaded={(pid) =>
+                        setStores((prev) =>
+                          prev.map((s) => s.id === store.id ? { ...s, imagePublicId: pid } : s)
+                        )
+                      }
+                    />
+                  )}
+                  <div>
+                    <strong>{store.name}</strong>
+                    <small style={{ marginLeft: 8, color: "var(--muted)" }}>{store.type}</small>
+                  </div>
                 </li>
               ))}
             </ul>

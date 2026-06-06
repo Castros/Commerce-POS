@@ -5,6 +5,7 @@ import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { authorizeTenant, authorizeStore, getActor, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, conflict, notFound, parseZod } from "../../shared/http/errors.js";
+import { enqueueCloseoutSummary } from "../ai/ai.service.js";
 
 export const cashDrawersRouter = Router();
 
@@ -319,6 +320,15 @@ cashDrawersRouter.post(
       return mapSession(closed);
     });
 
+    // Drawer close committed. Trigger AI summary asynchronously — does not block response.
     res.json({ data: result });
+
+    enqueueCloseoutSummary({
+      sessionId: result.id,
+      organizationId: result.organizationId,
+      storeId: result.storeId
+    }).catch((err) => {
+      console.error("[AI] Failed to enqueue closeout summary", err);
+    });
   })
 );

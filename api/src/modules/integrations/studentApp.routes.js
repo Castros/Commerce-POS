@@ -418,6 +418,7 @@ studentAppRouter.get(
       `
         SELECT o.id AS "organizationId",
                c.id AS "customerId",
+               c.avatar_public_id AS "avatarPublicId",
                w.id AS "walletId",
                w.balance_cents AS "balanceCents",
                w.credit_limit_cents AS "creditLimitCents"
@@ -442,11 +443,17 @@ studentAppRouter.get(
 
     const transactions = await loadTransactions(pool, row.organizationId, row.walletId);
 
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const avatarUrl = row.avatarPublicId && cloudName
+      ? `https://res.cloudinary.com/${cloudName}/image/upload/w_120,h_120,c_fill,r_max,f_auto,q_auto/${row.avatarPublicId}`
+      : null;
+
     res.json({
       data: {
         balance: centsToAmount(row.balanceCents),
         credit_limit: centsToAmount(row.creditLimitCents),
         amount_owed: centsToAmount(Math.max(0, -Number(row.balanceCents))),
+        avatar_url: avatarUrl,
         recent_transactions: transactions.map((transaction) => ({
           type: transaction.type,
           amount: centsToAmount(Math.abs(Number(transaction.amountCents))),

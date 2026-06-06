@@ -42,9 +42,8 @@ export function StudentSelector({
   return (
     <>
       <div className="linkStudentPanel">
-        <span>Student lookup</span>
         <input
-          placeholder="Search by matricula, name, or email"
+          placeholder="Search by name, matricula, or email"
           value={studentSearch}
           onChange={(event) => onSearchChange(event.target.value)}
           onKeyDown={(event) => {
@@ -56,17 +55,14 @@ export function StudentSelector({
         />
         <div className="studentLookupActions">
           <button type="button" onClick={onSearchSubmit} disabled={!studentSearch.trim() || searchingStudents}>
-            {searchingStudents ? "Searching..." : "Search students"}
+            {searchingStudents ? "Searching..." : "Search"}
           </button>
           <button type="button" onClick={onNfcConnect} disabled={!serialSupported || serialConnecting || serialConnected}>
-            {serialConnected ? "NFC connected" : serialConnecting ? "Connecting..." : "Connect NFC reader"}
+            {serialConnected ? "NFC connected" : serialConnecting ? "Connecting..." : "NFC"}
           </button>
         </div>
         {serialMessage ? (
           <small className={serialConnected ? "successText" : undefined}>{serialMessage}</small>
-        ) : null}
-        {!serialSupported ? (
-          <small>Web Serial requires Chrome or Edge over HTTPS or localhost.</small>
         ) : null}
         {searchResults.length > 0 ? (
           <div className="studentSearchResults">
@@ -78,38 +74,32 @@ export function StudentSelector({
               >
                 <strong>{student.name}</strong>
                 <span>
-                  {student.externalId || "No matricula"} - {student.classroomLabel} -{" "}
-                  {student.source === "pos" ? "POS customer" : "Student app"}
+                  {student.externalId || "No matricula"} · {student.classroomLabel}
                 </span>
               </button>
             ))}
           </div>
         ) : null}
-        <small>Optional for cash/card. Required for student wallet payment.</small>
       </div>
 
-      <div className="studentAccountList">
-        <span>Selected student wallet</span>
-        {students.length === 0 ? (
-          <p className="emptyState">No student selected. Search by name/matricula or tap an NFC card.</p>
-        ) : null}
-        {students.map((student) => (
-          <button
-            type="button"
-            className={student.id === selectedStudentId ? "active" : ""}
-            key={student.id}
-            onClick={() => onStudentSelect(student.id)}
-          >
-            <strong>{student.name}</strong>
-            <small>{formatMoney(student.wallet.balanceCents)}</small>
-          </button>
-        ))}
-        {students.length > 0 ? (
+      {students.length > 0 && (
+        <div className="studentAccountList">
+          {students.map((student) => (
+            <button
+              type="button"
+              className={student.id === selectedStudentId ? "active" : ""}
+              key={student.id}
+              onClick={() => onStudentSelect(student.id)}
+            >
+              <strong>{student.name}</strong>
+              <small>{formatMoney(student.wallet.balanceCents)}</small>
+            </button>
+          ))}
           <button type="button" onClick={onClearStudent}>
             Clear student
           </button>
-        ) : null}
-      </div>
+        </div>
+      )}
     </>
   );
 }

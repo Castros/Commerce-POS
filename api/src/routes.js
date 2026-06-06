@@ -1,9 +1,16 @@
 import { Router } from "express";
 
+import { aiRouter } from "./modules/ai/ai.routes.js";
+import { uploadsRouter } from "./modules/uploads/uploads.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { guardiansRouter } from "./modules/guardians/guardians.routes.js";
+import { guardianPortalRouter } from "./modules/guardians/guardianPortal.routes.js";
+import { employeesRouter } from "./modules/employees/employees.routes.js";
+import { payrollRouter } from "./modules/payroll/payroll.routes.js";
 import { cashDrawersRouter } from "./modules/cashDrawers/cashDrawers.routes.js";
 import { staffRouter } from "./modules/staff/staff.routes.js";
 import { customersRouter } from "./modules/customers/customers.routes.js";
+import { bulkImportRouter } from "./modules/customers/bulkImport.routes.js";
 import { demoRouter } from "./modules/demo/demo.routes.js";
 import { studentAppRouter } from "./modules/integrations/studentApp.routes.js";
 import { inventoryRouter } from "./modules/inventory/inventory.routes.js";
@@ -19,12 +26,14 @@ import { authenticateRequest } from "./shared/auth/auth.js";
 export const apiRouter = Router();
 
 apiRouter.use("/auth", authRouter);
+apiRouter.use("/guardian-portal", guardianPortalRouter); // parent-facing, own auth
 apiRouter.use(authenticateRequest);
 
 apiRouter.use("/organizations", organizationsRouter);
 apiRouter.use("/cash-drawers", cashDrawersRouter);
 apiRouter.use("/stores", storesRouter);
 apiRouter.use("/products", productsRouter);
+apiRouter.use("/customers/bulk-import", bulkImportRouter);
 apiRouter.use("/customers", customersRouter);
 apiRouter.use("/wallets", walletsRouter);
 apiRouter.use("/orders", ordersRouter);
@@ -34,3 +43,8 @@ apiRouter.use("/demo", demoRouter);
 apiRouter.use("/integrations/student-app", studentAppRouter);
 apiRouter.use("/inventory", inventoryRouter);
 apiRouter.use("/staff", staffRouter);
+apiRouter.use("/ai", aiRouter);
+apiRouter.use("/employees", employeesRouter);
+apiRouter.use("/payroll", payrollRouter);
+apiRouter.use("/guardians", guardiansRouter);
+apiRouter.use("/uploads", uploadsRouter);
