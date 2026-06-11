@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { pool } from "../../db/client.js";
-import { authorizeTenant, requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, loadActorCategoryRestrictions, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, parseZod } from "../../shared/http/errors.js";
 
 export const productsRouter = Router();
@@ -47,25 +47,46 @@ productsRouter.get(
       .parse(req.query);
 
     authorizeTenant(req.actor, query.organizationId);
+
+    const allowedCategoryIds = await loadActorCategoryRestrictions(
+      query.organizationId,
+      req.actor.actorUserId,
+      req.actor.role
+    );
+
     const values = [query.organizationId];
     let storeClause = "";
     if (query.storeId) {
       values.push(query.storeId);
-      storeClause = "AND (store_id = $2 OR store_id IS NULL)";
+      storeClause = "AND (p.store_id = $2 OR p.store_id IS NULL)";
     }
+
+    let categoryClause = "";
+    if (allowedCategoryIds !== null) {
+      values.push(allowedCategoryIds);
+      categoryClause = `AND (p.category_id IS NULL OR p.category_id = ANY($${values.length}::uuid[]))`;
+    }
+
+    const includeParam = values.length + 1;
+    values.push(query.includeInactive === "true");
 
     const result = await pool.query(
       `
-        SELECT id, organization_id AS "organizationId", store_id AS "storeId",
-               name, description, sku, image_url AS "imageUrl", price_cents AS "priceCents",
-               currency, taxable, active, created_at AS "createdAt"
-        FROM commerce_products
-        WHERE organization_id = $1
-          AND ($${query.storeId ? 3 : 2}::boolean = TRUE OR active = TRUE)
+        SELECT p.id, p.organization_id AS "organizationId", p.store_id AS "storeId",
+               p.category_id AS "categoryId", pc.name AS "categoryName",
+               p.name, p.description, p.sku, p.image_url AS "imageUrl",
+               p.price_cents AS "priceCents", p.currency, p.taxable,
+               p.active, p.created_at AS "createdAt"
+        FROM commerce_products p
+        LEFT JOIN commerce_product_categories pc ON pc.id = p.category_id
+        WHERE p.organization_id = $1
+          AND p.is_virtual = FALSE
+          AND ($${includeParam}::boolean = TRUE OR p.active = TRUE)
           ${storeClause}
-        ORDER BY name ASC
+          ${categoryClause}
+        ORDER BY p.name ASC
       `,
-      [...values, query.includeInactive === "true"]
+      values
     );
     res.json({ data: result.rows });
   })

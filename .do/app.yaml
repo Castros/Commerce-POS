@@ -11,8 +11,8 @@ region: nyc
 #   SENTRY_DSN           - from sentry.io project settings (optional)
 #
 # After first deploy, add your domain in the DO App Platform console:
-#   api.fransolution.net  → api service
-#   pos.fransolution.net  → web service
+#   pos-api.jerrycastro.dev  → api service
+#   pos.jerrycastro.dev      → web service
 
 services:
   - name: api
@@ -39,13 +39,30 @@ services:
         scope: RUN_TIME
         type: SECRET
       - key: CORS_ORIGINS
-        value: https://pos.fransolution.net
+        value: https://pos.jerrycastro.dev
       - key: API_PORT
         value: "4100"
       - key: SENTRY_DSN
         scope: RUN_TIME
         type: SECRET
       - key: ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: RESEND_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: EMAIL_FROM
+        scope: RUN_TIME
+        type: SECRET
+      - key: APP_URL
+        value: https://pos.jerrycastro.dev
+      - key: CLOUDINARY_CLOUD_NAME
+        scope: RUN_TIME
+        type: SECRET
+      - key: CLOUDINARY_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: CLOUDINARY_API_SECRET
         scope: RUN_TIME
         type: SECRET
 
@@ -64,6 +81,9 @@ services:
         value: production
       - key: API_URL
         value: ${api.PRIVATE_URL}
+      - key: NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
+        scope: RUN_TIME
+        type: SECRET
 
 databases:
   - name: db

@@ -49,6 +49,24 @@ export async function apiPost<T>(
   return (payload as ApiEnvelope<T>).data;
 }
 
+export async function apiPut<T>(
+  path: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {}
+): Promise<T> {
+  const response = await fetch(`/api/v1${path}`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      ...headers
+    },
+    credentials: "include",
+    body: JSON.stringify(body)
+  });
+  const payload = await readApiPayload<T>(response);
+  return (payload as ApiEnvelope<T>).data;
+}
+
 export async function apiPatch<T>(
   path: string,
   body: Record<string, unknown>,

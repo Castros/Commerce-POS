@@ -3,7 +3,9 @@ import { z } from "zod";
 
 import { pool } from "../../db/client.js";
 import { authorizeTenant, getActor, requirePermission } from "../../shared/auth/auth.js";
-import { asyncHandler, parseZod } from "../../shared/http/errors.js";
+import { asyncHandler, forbidden, parseZod } from "../../shared/http/errors.js";
+
+const PLATFORM_ROLES = new Set(["platform_admin", "super_admin", "service"]);
 
 export const organizationsRouter = Router();
 
@@ -21,13 +23,15 @@ const updateOrganizationSchema = z.object({
   currency: z.string().min(1).max(3).optional(),
   taxEnabled: z.boolean().optional(),
   taxRateBps: z.number().int().min(0).max(10000).optional(),
+  contactEmail: z.string().email().nullable().optional(),
   active: z.boolean().optional()
 });
 
 const ORG_COLUMNS = `
   id, name, type, external_school_id AS "externalSchoolId",
   active, currency, tax_enabled AS "taxEnabled",
-  tax_rate_bps AS "taxRateBps", created_at AS "createdAt"
+  tax_rate_bps AS "taxRateBps", contact_email AS "contactEmail",
+  created_at AS "createdAt"
 `;
 
 organizationsRouter.get(
@@ -57,6 +61,10 @@ organizationsRouter.post(
   "/",
   requirePermission("organizations:write"),
   asyncHandler(async (req, res) => {
+    const actor = getActor(req);
+    if (!PLATFORM_ROLES.has(actor.role)) {
+      throw forbidden("Only platform administrators can create organizations");
+    }
     const body = parseZod(createOrganizationSchema, req.body);
     const result = await pool.query(
       `INSERT INTO commerce_organizations (name, type, external_school_id)
@@ -84,7 +92,8 @@ organizationsRouter.patch(
            currency      = COALESCE($4, currency),
            tax_enabled   = COALESCE($5, tax_enabled),
            tax_rate_bps  = COALESCE($6, tax_rate_bps),
-           active        = COALESCE($7, active)
+           active        = COALESCE($7, active),
+           contact_email = COALESCE($8, contact_email)
        WHERE id = $1
        RETURNING ${ORG_COLUMNS}`,
       [
@@ -94,7 +103,8 @@ organizationsRouter.patch(
         body.currency ?? null,
         body.taxEnabled ?? null,
         body.taxRateBps ?? null,
-        body.active ?? null
+        body.active ?? null,
+        body.contactEmail ?? null
       ]
     );
 

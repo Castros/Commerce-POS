@@ -227,16 +227,22 @@ authRouter.get(
       throw unauthorized("Login required");
     }
 
-    const assignments = await pool.query(
-      `
-        SELECT store_id AS "storeId"
-        FROM commerce_user_store_assignments
-        WHERE organization_id = $1
-          AND user_id = $2
-        ORDER BY created_at ASC
-      `,
-      [user.organizationId, user.id]
-    );
+    const [assignments, categoryPerms] = await Promise.all([
+      pool.query(
+        `SELECT store_id AS "storeId"
+         FROM commerce_user_store_assignments
+         WHERE organization_id = $1 AND user_id = $2
+         ORDER BY created_at ASC`,
+        [user.organizationId, user.id]
+      ),
+      pool.query(
+        `SELECT category_id AS "categoryId"
+         FROM commerce_user_category_permissions
+         WHERE organization_id = $1 AND user_id = $2
+         ORDER BY created_at ASC`,
+        [user.organizationId, user.id]
+      )
+    ]);
 
     res.json({
       data: {
@@ -250,7 +256,8 @@ authRouter.get(
           active: user.active,
           pinLast4: user.pinLast4,
           pinSetAt: user.pinSetAt,
-          storeIds: assignments.rows.map((row) => row.storeId)
+          storeIds: assignments.rows.map((row) => row.storeId),
+          categoryIds: categoryPerms.rows.map((row) => row.categoryId)
         },
         authMode: browserSession.authMode
       }

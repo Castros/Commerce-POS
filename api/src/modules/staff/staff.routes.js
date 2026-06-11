@@ -54,6 +54,10 @@ const updateStoresSchema = z.object({
   storeIds: z.array(z.string().uuid())
 });
 
+const updateCategoryPermissionsSchema = z.object({
+  categoryIds: z.array(z.string().uuid())
+});
+
 async function fetchStaffRow(id) {
   const result = await pool.query(
     `SELECT id, organization_id AS "organizationId" FROM commerce_users WHERE id = $1`,
@@ -247,6 +251,64 @@ staffRouter.put(
 
       await client.query("COMMIT");
       res.json({ data: { id: req.params.id, storeIds: body.storeIds } });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => null);
+      throw err;
+    } finally {
+      client.release();
+    }
+  })
+);
+
+staffRouter.get(
+  "/:id/category-permissions",
+  requirePermission("organizations:write"),
+  asyncHandler(async (req, res) => {
+    const actor = getActor(req);
+    const existing = await fetchStaffRow(req.params.id);
+    assertSameOrg(actor, existing.organizationId);
+
+    const result = await pool.query(
+      `SELECT category_id AS "categoryId"
+       FROM commerce_user_category_permissions
+       WHERE organization_id = $1 AND user_id = $2
+       ORDER BY created_at ASC`,
+      [existing.organizationId, req.params.id]
+    );
+
+    res.json({ data: { id: req.params.id, categoryIds: result.rows.map((r) => r.categoryId) } });
+  })
+);
+
+staffRouter.put(
+  "/:id/category-permissions",
+  requirePermission("organizations:write"),
+  asyncHandler(async (req, res) => {
+    const actor = getActor(req);
+    const body = parseZod(updateCategoryPermissionsSchema, req.body);
+    const existing = await fetchStaffRow(req.params.id);
+    assertSameOrg(actor, existing.organizationId);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      await client.query(
+        `DELETE FROM commerce_user_category_permissions
+         WHERE organization_id = $1 AND user_id = $2`,
+        [existing.organizationId, req.params.id]
+      );
+
+      for (const categoryId of body.categoryIds) {
+        await client.query(
+          `INSERT INTO commerce_user_category_permissions (organization_id, user_id, category_id)
+           VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+          [existing.organizationId, req.params.id, categoryId]
+        );
+      }
+
+      await client.query("COMMIT");
+      res.json({ data: { id: req.params.id, categoryIds: body.categoryIds } });
     } catch (err) {
       await client.query("ROLLBACK").catch(() => null);
       throw err;

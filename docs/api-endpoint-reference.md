@@ -811,6 +811,141 @@ curl -s "$API_BASE_URL/integrations/student-app/students/$EXTERNAL_STUDENT_ID/ca
   -H "Authorization: Bearer $TOKEN"
 ```
 
+## Guardian Portal
+
+The guardian portal uses a **separate session cookie** (`guardian_portal_session`) from staff auth. These endpoints do not require a staff bearer token.
+
+### POST /v1/guardian-portal/auth/request
+
+Sends a 6-digit OTP to the guardian's email. Always returns `{ data: { sent: true } }` — never reveals whether the email is registered.
+
+```bash
+curl -s -X POST "$API_BASE_URL/guardian-portal/auth/request" \
+  -H "Content-Type: application/json" \
+  -d '{"organizationId":"<org-id>","email":"parent@example.com"}'
+```
+
+### POST /v1/guardian-portal/auth/verify
+
+Verifies the OTP and issues the session cookie.
+
+```bash
+curl -s -c cookies.txt -X POST "$API_BASE_URL/guardian-portal/auth/verify" \
+  -H "Content-Type: application/json" \
+  -d '{"organizationId":"<org-id>","email":"parent@example.com","code":"123456"}'
+```
+
+### GET /v1/guardian-portal/me
+
+Returns guardian info, linked students with balances, recent transactions, and `notificationPrefs`.
+
+```bash
+curl -s -b cookies.txt "$API_BASE_URL/guardian-portal/me"
+```
+
+### PATCH /v1/guardian-portal/me/notifications
+
+Updates notification preferences. All fields optional.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `emailOnPurchase` | boolean | Receive receipt email on every purchase |
+| `lowBalanceThresholdCents` | integer | Alert threshold in cents |
+
+```bash
+curl -s -b cookies.txt -X PATCH "$API_BASE_URL/guardian-portal/me/notifications" \
+  -H "Content-Type: application/json" \
+  -d '{"emailOnPurchase":false}'
+```
+
+---
+
+## Fee Assignments
+
+### GET /v1/fee-assignments
+
+List fee assignments. Filter by `status` (`pending`, `paid`, `cancelled`) and `customerId`.
+
+```bash
+curl -s "$API_BASE_URL/fee-assignments?organizationId=$ORG_ID&status=pending" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /v1/fee-assignments
+
+Create a new fee assignment for a student.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `storeId` | yes | |
+| `customerId` | yes | Student/customer UUID |
+| `amountCents` | yes | Integer cents |
+| `description` | yes | e.g. "Field trip — Oct 15" |
+| `dueDate` | no | ISO date string |
+
+```bash
+curl -s -X POST "$API_BASE_URL/fee-assignments" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"storeId\":\"$STORE_ID\",\"customerId\":\"$CUSTOMER_ID\",\"amountCents\":1500,\"description\":\"Field trip\"}"
+```
+
+### POST /v1/fee-assignments/:id/pay
+
+Collect a pending fee at the register. Accepts the same payment methods as a regular sale.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `paymentMethod` | yes | `wallet`, `cash`, `card` |
+| `walletAccountId` | if wallet | Required when method is `wallet` |
+
+```bash
+curl -s -X POST "$API_BASE_URL/fee-assignments/$FEE_ID/pay" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: fee-pay-$(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"paymentMethod\":\"cash\"}"
+```
+
+### PATCH /v1/fee-assignments/:id
+
+Cancel a fee assignment: `{ "cancel": true }`.
+
+```bash
+curl -s -X PATCH "$API_BASE_URL/fee-assignments/$FEE_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"cancel":true}'
+```
+
+---
+
+## Staff Category Permissions
+
+### GET /v1/staff/:id/category-permissions
+
+Returns the list of category IDs the staff member is restricted to. Empty array = unrestricted.
+
+```bash
+curl -s "$API_BASE_URL/staff/$STAFF_ID/category-permissions?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /v1/staff/:id/category-permissions
+
+Replace the full set of allowed categories. Send an empty array to remove all restrictions.
+
+```bash
+curl -s -X PUT "$API_BASE_URL/staff/$STAFF_ID/category-permissions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"categoryIds\":[\"$CAT_ID_1\",\"$CAT_ID_2\"]}"
+```
+
+---
+
 ## Suggested First Test Flow
 
 Use this sequence when testing in Postman or curl:

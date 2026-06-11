@@ -3,113 +3,227 @@
 Commerce POS runs on DigitalOcean App Platform with a managed Postgres database.
 Every push to `main` triggers an automatic deploy via GitHub Actions.
 
+> **Domain placeholder** — this doc uses `<YOUR_DOMAIN>` wherever the production
+> domain appears. When you choose a real domain, replace every instance and update
+> two files: `.do/app.yaml` (`CORS_ORIGINS`, `APP_URL`) and this doc.
+> Current working domain: `jerrycastro.dev`
+
 ---
 
 ## Architecture
 
 ```
 GitHub (main branch)
-  └── GitHub Actions CI  →  syntax check + web build
-  └── GitHub Actions Deploy  →  doctl apps update + create-deployment
+  └── GitHub Actions CI     →  syntax check + web build
+  └── GitHub Actions Deploy →  doctl apps update + create-deployment
 
 DigitalOcean App Platform
-  ├── PRE_DEPLOY job: node src/db/migrate.js  (runs migrations before new version starts)
-  ├── Service: api        (pos-api.fransolution.net → api.fransolution.net)
-  ├── Service: web        (pos.fransolution.net)
+  ├── PRE_DEPLOY job: node src/db/migrate.js  (runs before new version starts)
+  ├── Service: api   →  pos-api.<YOUR_DOMAIN>
+  ├── Service: web   →  pos.<YOUR_DOMAIN>
   └── Database: Postgres 16 managed (daily backups, automatic failover)
 
 Cloudflare
-  └── DNS for fransolution.net
-  └── SSL termination (proxied)
+  └── DNS for <YOUR_DOMAIN>  (orange cloud proxy on pos and pos-api subdomains)
+  └── SSL termination + DDoS protection
 ```
 
 ---
 
-## One-time setup
+## Phase 1 — Accounts and secrets
 
-### 1. Install doctl
+### 1.1 Accounts required
+
+| Service | Purpose | Cost |
+|---|---|---|
+| [digitalocean.com](https://digitalocean.com) | App hosting + managed Postgres | ~$25/mo |
+| [cloudinary.com](https://cloudinary.com) | Product image uploads | Free tier |
+| [resend.com](https://resend.com) | Transactional email | Free tier |
+| [console.anthropic.com](https://console.anthropic.com) | AI closeout summaries + anomaly alerts | Pay-per-use (~$0/mo at school scale) |
+
+### 1.2 Generate random secrets
+
+Run these locally and save the output in a password manager:
 
 ```bash
-brew install doctl                     # macOS
-# or: https://docs.digitalocean.com/reference/doctl/how-to/install/
-
-doctl auth init                        # paste your DO personal access token
+openssl rand -hex 32   # → SESSION_SECRET
+openssl rand -hex 32   # → COMMERCE_API_TOKEN
 ```
 
-### 2. Create the app
+---
+
+## Phase 2 — DO personal access token + GitHub secret
+
+1. DO Dashboard → **API → Personal Access Tokens → Generate New Token**
+   - Name: `github-actions-commerce-pos`
+   - Scope: Write
+   - Copy the token immediately (shown only once)
+
+2. GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `DIGITALOCEAN_ACCESS_TOKEN`
+   - Value: paste the token
+
+`DIGITALOCEAN_APP_ID` is added in Phase 5 after the app is created.
+
+---
+
+## Phase 3 — First deploy
+
+The CI/CD pipeline deploys from `main`. Merge your working branch and push:
 
 ```bash
-doctl apps create --spec .do/app.yaml
+git checkout main
+git merge feature/your-branch
+git push origin main
 ```
 
-Copy the App ID from the output. You'll need it in step 4.
+GitHub Actions runs CI (syntax check + web build) then creates the DO app automatically.
+First build takes 5–10 minutes. Watch progress at:
 
-### 3. Set secret environment variables
+```
+GitHub repo → Actions → Deploy workflow
+```
 
-In the DO dashboard → Apps → commerce-pos → Settings → Environment Variables,
-set these as **encrypted** values:
+or via CLI once doctl is installed:
 
-| Variable | How to generate |
+```bash
+doctl apps list
+doctl apps logs <APP_ID> --type=run --follow
+```
+
+---
+
+## Phase 4 — Set secret environment variables in DO
+
+After the first build starts, go to:
+**DO Dashboard → Apps → commerce-pos → Settings → Environment Variables**
+
+Add each of these as an **encrypted** variable:
+
+| Variable | Where to get it |
 |---|---|
-| `SESSION_SECRET` | `openssl rand -hex 32` |
-| `COMMERCE_API_TOKEN` | `openssl rand -hex 32` |
-| `SENTRY_DSN` | From sentry.io project settings |
-| `STRIPE_SECRET_KEY` | From dashboard.stripe.com (use test key until ready) |
-| `STRIPE_WEBHOOK_SECRET` | From Stripe webhook settings |
-| `RESEND_API_KEY` | From resend.com |
+| `SESSION_SECRET` | Generated in Phase 1 |
+| `COMMERCE_API_TOKEN` | Generated in Phase 1 |
+| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys |
+| `RESEND_API_KEY` | resend.com → API Keys |
+| `EMAIL_FROM` | `Commerce POS <noreply@mail.<YOUR_DOMAIN>>` |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary dashboard → Settings → API Keys |
+| `CLOUDINARY_API_KEY` | Cloudinary dashboard → Settings → API Keys |
+| `CLOUDINARY_API_SECRET` | Cloudinary dashboard → Settings → API Keys |
+| `NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME` | Same value as `CLOUDINARY_CLOUD_NAME` |
+| `SENTRY_DSN` | sentry.io project settings (optional) |
 
-### 4. Add GitHub Actions secrets
+After setting all vars, trigger a new deploy so they take effect:
 
-In GitHub → repo → Settings → Secrets → Actions, add:
+```bash
+doctl apps create-deployment <APP_ID>
+```
 
-| Secret | Value |
-|---|---|
-| `DIGITALOCEAN_ACCESS_TOKEN` | Your DO personal access token |
-| `DIGITALOCEAN_APP_ID` | The App ID from step 2 |
+---
 
-### 5. Point your domain
+## Phase 5 — Capture App ID and finish GitHub setup
 
-In Cloudflare DNS for `fransolution.net`:
+DO Dashboard → Apps → commerce-pos → Settings → copy the **App ID** at the top.
+
+GitHub repo → Secrets → New repository secret:
+- Name: `DIGITALOCEAN_APP_ID`
+- Value: paste the App ID
+
+After this, every push to `main` runs a full CI + deploy automatically with no manual steps.
+
+---
+
+## Phase 6 — Cloudflare DNS + DO custom domains
+
+Once the app is live on its default `.ondigitalocean.app` URL, wire up your real domain.
+
+### 6.1 Add DNS records in Cloudflare
+
+In Cloudflare dashboard → `<YOUR_DOMAIN>` zone → DNS:
 
 | Type | Name | Target | Proxy |
 |---|---|---|---|
-| CNAME | `pos` | `<web-service>.ondigitalocean.app` | Proxied (orange cloud) |
-| CNAME | `api` | `<api-service>.ondigitalocean.app` | Proxied (orange cloud) |
+| `CNAME` | `pos` | `<web-service>.ondigitalocean.app` | Proxied (orange cloud) |
+| `CNAME` | `pos-api` | `<api-service>.ondigitalocean.app` | Proxied (orange cloud) |
 
 Get the `.ondigitalocean.app` hostnames from:
 DO Dashboard → Apps → commerce-pos → Settings → Domains
 
-Then in DO dashboard, add the custom domains:
-- `pos.fransolution.net` → web service
-- `api.fransolution.net` → api service
+### 6.2 Add custom domains in DO
 
-DO will verify the domain via Cloudflare and provision SSL automatically.
+DO Dashboard → Apps → commerce-pos → Settings → Domains → Add Domain:
+- `pos.<YOUR_DOMAIN>` → web service
+- `pos-api.<YOUR_DOMAIN>` → api service
 
-### 6. Verify it's working
+DO verifies ownership via the Cloudflare CNAME and provisions SSL automatically.
 
-```bash
-curl https://api.fransolution.net/health
-# Expected: {"status":"ok"}
+### 6.3 Cloudflare SSL hardening
 
-curl https://api.fransolution.net/ready
-# Expected: {"status":"ready"}
-```
+In Cloudflare dashboard → `<YOUR_DOMAIN>` → SSL/TLS:
+- Mode: **Full (strict)** — encrypts both browser→Cloudflare and Cloudflare→DO legs
+- Minimum TLS version: **TLS 1.2**
 
 ---
 
-## Deploying
+## Phase 7 — Verify
+
+```bash
+curl https://pos-api.<YOUR_DOMAIN>/health
+# Expected: {"status":"ok"}
+
+curl https://pos-api.<YOUR_DOMAIN>/ready
+# Expected: {"status":"ready"}
+```
+
+Then open `https://pos.<YOUR_DOMAIN>` in a browser and do a full cashier login test.
+
+---
+
+## Email setup (Resend)
+
+Transactional email (receipts, wallet confirmations, parent notifications) is sent via
+[Resend](https://resend.com) from the subdomain `mail.<YOUR_DOMAIN>`.
+
+### Step 1 — Add domain in Resend
+
+1. resend.com → **Domains → Add Domain**
+2. Enter `mail.<YOUR_DOMAIN>` and click Add
+3. Resend shows 3 DNS records — copy the exact values from the dashboard
+
+### Step 2 — Add DNS records in Cloudflare
+
+In Cloudflare → `<YOUR_DOMAIN>` → DNS, add the 3 records Resend gave you:
+
+| Type | Name | Notes |
+|---|---|---|
+| `TXT` | `mail` | SPF record |
+| `CNAME` | `resend._domainkey.mail` | DKIM record |
+| `MX` | `mail` | Bounce handling |
+
+Set all 3 to **gray cloud (DNS only)** — do not proxy email records through Cloudflare.
+
+DNS propagation takes 5–30 minutes. Back in Resend, click **Verify** — all 3 should go green.
+
+### Step 3 — Get API key
+
+Resend → **API Keys → Create API Key**
+Name it `commerce-pos-production`. Copy the `re_...` value (shown only once).
+Add it to DO as `RESEND_API_KEY` (Phase 4).
+
+---
+
+## Ongoing deploys
 
 Every push to `main` auto-deploys. To deploy manually:
 
 ```bash
-APP_ID=your-app-id
-doctl apps create-deployment $APP_ID
+doctl apps create-deployment <APP_ID>
 ```
 
 Watch logs:
 
 ```bash
-doctl apps logs $APP_ID --type=run --follow
+doctl apps logs <APP_ID> --type=run --follow
 ```
 
 ---
@@ -120,9 +234,23 @@ Migrations run automatically as a PRE_DEPLOY job before every deploy.
 To run manually against production:
 
 ```bash
-# Get the DATABASE_URL from DO dashboard → Apps → commerce-pos → Settings → Components → db
+# Get DATABASE_URL from DO Dashboard → Apps → commerce-pos → Settings → db component
 DATABASE_URL="postgres://..." node api/src/db/migrate.js
 ```
+
+---
+
+## Rollback
+
+```bash
+# List recent deployments
+doctl apps list-deployments <APP_ID>
+
+# Force rebuild of current spec
+doctl apps create-deployment <APP_ID> --force-rebuild
+```
+
+Or revert the commit on `main` and push — CI/CD deploys the reverted version.
 
 ---
 
@@ -130,47 +258,49 @@ DATABASE_URL="postgres://..." node api/src/db/migrate.js
 
 | Component | Size | Monthly |
 |---|---|---|
-| API service | 1 vCPU / 512MB | ~$5 |
-| Web service | 1 vCPU / 512MB | ~$5 |
+| API service | 1 vCPU / 512 MB | ~$5 |
+| Web service | 1 vCPU / 512 MB | ~$5 |
 | Postgres managed | dev database | ~$15 |
 | **Total** | | **~$25/month** |
 
-Upgrade API + web to `apps-s-1vcpu-1gb` ($12/ea) when you hit the first 5 paying schools.
-Upgrade Postgres to `db-s-1vcpu-1gb` ($15/month) when you need connection pooling or >5GB data.
+**Scale triggers:**
+- 5+ schools → upgrade API + web to `apps-s-1vcpu-1gb` ($12/ea)
+- 5+ schools → upgrade Postgres to `db-s-1vcpu-1gb` ($15/mo) for connection pooling
+- 2+ API instances → sessions are safe to scale (stored in Postgres, not in-memory)
 
 ---
 
 ## Monitoring
 
-- **Uptime**: DO App Platform sends alerts on service restarts (configure in DO dashboard → Alerts)
-- **Errors**: Sentry at sentry.io — set `SENTRY_DSN` env var in DO dashboard
-- **Logs**: `doctl apps logs $APP_ID --type=run --follow`
-- **DB**: DO Managed Postgres dashboard shows connections, query performance, storage
+- **Uptime**: DO App Platform → Alerts (configure service restart alerts)
+- **Errors**: Sentry — set `SENTRY_DSN` env var
+- **Logs**: `doctl apps logs <APP_ID> --type=run --follow`
+- **DB**: DO Managed Postgres dashboard → connections, query performance, storage
 
 ---
 
 ## Backups
 
-DO Managed Postgres (`db-s-dev-database` tier) includes **daily backups retained for 7 days**.
+DO Managed Postgres dev tier includes **daily backups retained for 7 days**.
 To restore: DO Dashboard → Databases → commerce-pos-db → Backups → Restore.
 
-When you upgrade to a paid Postgres tier, backups extend to 30 days.
+Upgrade to a paid Postgres tier for 30-day backup retention.
 
 ---
 
-## Rollback
+## Changing the domain
 
-To redeploy a previous version:
+When you move from the working domain to a real product domain, update these:
 
-```bash
-# List recent deployments
-doctl apps list-deployments $APP_ID
+| File | What to change |
+|---|---|
+| `.do/app.yaml` | `CORS_ORIGINS` value, `APP_URL` value |
+| `docs/deployment.md` | Replace all `<YOUR_DOMAIN>` / current domain instances |
+| Cloudflare | Remove old CNAME records, add new ones |
+| DO Dashboard | Remove old custom domains, add new ones |
+| Resend | Add new sending domain (`mail.<new-domain>`), update `EMAIL_FROM` in DO |
 
-# Redeploy a specific deployment
-doctl apps create-deployment $APP_ID --force-rebuild
-```
-
-Or just revert the commit on `main` and push — the CI/CD pipeline will deploy the reverted version.
+The app code itself has no hardcoded domain — it all comes from env vars.
 
 ---
 
@@ -182,6 +312,6 @@ Or just revert the commit on `main` and push — the CI/CD pipeline will deploy 
 | `DISABLE_DEMO_SEED` | `false` | `true` |
 | `DATABASE_URL` | local Docker Postgres | DO Managed Postgres |
 | `API_URL` | `http://api:4100` | DO internal private URL |
-| `CORS_ORIGINS` | `http://localhost:3100` | `https://pos.fransolution.net` |
+| `CORS_ORIGINS` | `http://localhost:3100` | `https://pos.<YOUR_DOMAIN>` |
 | Demo seed endpoint | enabled | disabled |
 | Dev actor fallback | enabled | disabled |

@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { key: "nav.customers",     href: "/customers",     icon: "school",          role: "Cashier" },
   { key: "nav.guardians",     href: "/guardians",     icon: "family_restroom", role: "Manager" },
   { key: "nav.employees",     href: "/employees",     icon: "badge",           role: "Manager" },
+  { key: "nav.fees",          href: "/fees",           icon: "request_quote",   role: "Manager" },
   { key: "nav.payroll",       href: "/payroll",       icon: "payments",        role: "Admin" },
   { key: "nav.studentApp",    href: "/student-demo",  icon: "account_child",   role: "Family" },
   { key: "nav.reports",       href: "/reports",       icon: "monitoring",      role: "Admin" },
@@ -35,6 +36,34 @@ const NAV_ITEMS = [
 const SIDEBAR_KEY = "commerce_pos_sidebar_collapsed";
 const publicPaths = new Set(["/login", "/register-login"]);
 const workspaceRoles = new Set(["super_admin", "organization_admin", "store_manager", "admin", "manager"]);
+
+// Numeric access level per DB role — higher = more access
+const ROLE_LEVEL: Record<string, number> = {
+  cashier:              1,
+  accountant:           1,
+  store_manager:        2,
+  organization_owner:   3,
+  organization_admin:   3,
+  super_admin:          4,
+  platform_admin:       4,
+  service:              4
+};
+
+// Minimum level required per nav role label
+const NAV_MIN_LEVEL: Record<string, number> = {
+  All:      0,
+  Family:   1,
+  Cashier:  1,
+  Manager:  2,
+  Admin:    3,
+  Platform: 4
+};
+
+function canSeeNavItem(userRole: string, navRole: string): boolean {
+  const userLevel = ROLE_LEVEL[userRole] ?? 0;
+  const required  = NAV_MIN_LEVEL[navRole] ?? 99;
+  return userLevel >= required;
+}
 
 function LangToggle() {
   const { lang, setLang } = useLanguage();
@@ -173,14 +202,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="navList" aria-label="Primary navigation">
-          {NAV_ITEMS.map(({ key, href, icon, role }) => (
+          {NAV_ITEMS.filter(({ role }) =>
+            canSeeNavItem(session?.user.role ?? "", role)
+          ).map(({ key, href, icon }) => (
             <Link href={href} key={href} className={pathname === href ? "active" : ""} title={t(key)}>
               <span className="navIcon">
                 <span className="material-symbols-outlined" aria-hidden="true">{icon}</span>
               </span>
               <span className="navText">
                 {t(key)}
-                <small>{role}</small>
               </span>
             </Link>
           ))}

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import type { DemoStudent, Receipt } from "../lib/demoTypes";
+import type { DemoStudent, FeeAssignment, Receipt } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
 import { avatarUrl } from "../lib/imageUrl";
 import type { CartLine, PaymentMethod } from "./types";
@@ -21,9 +21,12 @@ type CartPanelProps = {
   completeDisabled: boolean;
   checkoutMessage: string | null;
   completeHelp: string;
+  pendingFees: FeeAssignment[];
+  collectingFeeId: string | null;
   onQuantityChange: (productId: string, delta: number) => void;
   onPaymentMethodChange: (paymentMethod: PaymentMethod) => void;
   onCompleteSale: () => void;
+  onCollectFee: (feeId: string) => void;
 };
 
 export function CartPanel({
@@ -39,9 +42,12 @@ export function CartPanel({
   completeDisabled,
   checkoutMessage,
   completeHelp,
+  pendingFees,
+  collectingFeeId,
   onQuantityChange,
   onPaymentMethodChange,
-  onCompleteSale
+  onCompleteSale,
+  onCollectFee
 }: CartPanelProps) {
   return (
     <>
@@ -65,6 +71,33 @@ export function CartPanel({
           {walletStatus === "Blocked" && (
             <p className="walletWarning">Over credit limit by {formatMoney(creditExceededCents)}.</p>
           )}
+        </div>
+      )}
+
+      {pendingFees.length > 0 && (
+        <div className="pendingFeesPanel">
+          <h4 className="pendingFeesTitle">Pending fees</h4>
+          {pendingFees.map((fee) => (
+            <div key={fee.id} className="pendingFeeRow">
+              <div className="pendingFeeMeta">
+                <span className="pendingFeeDesc">{fee.description}</span>
+                {fee.dueDate && (
+                  <span className="pendingFeeDue">Due {new Date(fee.dueDate).toLocaleDateString()}</span>
+                )}
+              </div>
+              <div className="pendingFeeRight">
+                <strong>{formatMoney(fee.amountCents)}</strong>
+                <button
+                  type="button"
+                  className="btnPrimary pendingFeeCollect"
+                  disabled={collectingFeeId === fee.id}
+                  onClick={() => onCollectFee(fee.id)}
+                >
+                  {collectingFeeId === fee.id ? "..." : "Collect"}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

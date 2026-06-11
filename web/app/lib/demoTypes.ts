@@ -7,6 +7,7 @@ export type Organization = {
   currency?: string;
   taxEnabled?: boolean;
   taxRateBps?: number;
+  contactEmail?: string | null;
   createdAt?: string;
 };
 
@@ -21,6 +22,8 @@ export type Product = {
   id: string;
   organizationId: string;
   storeId: string | null;
+  categoryId?: string | null;
+  categoryName?: string | null;
   name: string;
   description: string | null;
   sku: string | null;
@@ -33,6 +36,36 @@ export type Product = {
   reorderThreshold?: number | string;
   location?: string | null;
   inventoryStatus?: "in_stock" | "low" | "out" | "not_tracked";
+};
+
+export type Category = {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  color: string | null;
+  isSystem: boolean;
+  active: boolean;
+  createdAt: string;
+};
+
+export type FeeAssignment = {
+  id: string;
+  organizationId: string;
+  storeId: string;
+  customerId: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  amountCents: number;
+  currency: string;
+  description: string;
+  dueDate: string | null;
+  status: "pending" | "paid" | "cancelled";
+  paidOrderId: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Wallet = {

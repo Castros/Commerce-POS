@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
 import AvatarUpload from "../components/AvatarUpload";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost, apiPut } from "../lib/api";
 import { loadCurrentOrganization } from "../lib/organizationContext";
-import type { Store } from "../lib/demoTypes";
+import type { Category, Store } from "../lib/demoTypes";
 
 type StaffMember = {
   id: string;
@@ -28,6 +28,7 @@ type FormState = {
   role: string;
   pin: string;
   storeIds: string[];
+  categoryIds: string[];
   active: boolean;
 };
 
@@ -45,8 +46,10 @@ const ROLE_COLORS: Record<string, string> = {
   accountant: "muted"
 };
 
+const CATEGORY_RESTRICTED_ROLES = new Set(["store_manager", "cashier", "accountant"]);
+
 function blankForm(): FormState {
-  return { name: "", email: "", role: "cashier", pin: "", storeIds: [], active: true };
+  return { name: "", email: "", role: "cashier", pin: "", storeIds: [], categoryIds: [], active: true };
 }
 
 function staffToForm(s: StaffMember): FormState {
@@ -56,6 +59,7 @@ function staffToForm(s: StaffMember): FormState {
     role: s.role,
     pin: "",
     storeIds: s.storeIds,
+    categoryIds: [],
     active: s.active
   };
 }
@@ -64,6 +68,7 @@ export function StaffClient() {
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ text: string; type: "ok" | "err" } | null>(null);
   const [panel, setPanel] = useState<"none" | "create" | "edit" | "pin">("none");
@@ -81,12 +86,14 @@ export function StaffClient() {
     try {
       const org = await loadCurrentOrganization();
       setOrganizationId(org.id);
-      const [staffData, storeData] = await Promise.all([
+      const [staffData, storeData, catResult] = await Promise.all([
         apiGet<StaffMember[]>(`/staff?organizationId=${org.id}`),
-        apiGet<Store[]>(`/stores?organizationId=${org.id}`)
+        apiGet<Store[]>(`/stores?organizationId=${org.id}`),
+        apiGet<Category[]>(`/product-categories?organizationId=${org.id}`).catch(() => [] as Category[])
       ]);
       setStaff(staffData);
       setStores(storeData);
+      setCategories(catResult);
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Could not load staff", type: "err" });
     } finally {
@@ -101,11 +108,21 @@ export function StaffClient() {
     setMessage(null);
   }
 
-  function openEdit(member: StaffMember) {
-    setForm(staffToForm(member));
+  async function openEdit(member: StaffMember) {
+    const base = staffToForm(member);
+    setForm(base);
     setEditTarget(member);
     setPanel("edit");
     setMessage(null);
+
+    try {
+      const perms = await apiGet<{ id: string; categoryIds: string[] }>(
+        `/staff/${member.id}/category-permissions`
+      );
+      setForm((f) => ({ ...f, categoryIds: perms.categoryIds }));
+    } catch {
+      // keep empty — will treat as unrestricted
+    }
   }
 
   function openPin(member: StaffMember) {
@@ -130,6 +147,15 @@ export function StaffClient() {
       storeIds: f.storeIds.includes(storeId)
         ? f.storeIds.filter((id) => id !== storeId)
         : [...f.storeIds, storeId]
+    }));
+  }
+
+  function toggleCategoryId(catId: string) {
+    setForm((f) => ({
+      ...f,
+      categoryIds: f.categoryIds.includes(catId)
+        ? f.categoryIds.filter((id) => id !== catId)
+        : [...f.categoryIds, catId]
     }));
   }
 
@@ -168,7 +194,10 @@ export function StaffClient() {
         active: form.active
       });
 
-      await apiPost(`/staff/${editTarget.id}/stores`, { storeIds: form.storeIds });
+      await Promise.all([
+        apiPut(`/staff/${editTarget.id}/stores`, { storeIds: form.storeIds }),
+        apiPut(`/staff/${editTarget.id}/category-permissions`, { categoryIds: form.categoryIds })
+      ]);
 
       setStaff((s) => s.map((m) => (m.id === updated.id ? { ...updated, storeIds: form.storeIds } : m)));
       closePanel();
@@ -208,6 +237,9 @@ export function StaffClient() {
 
   const storeName = (id: string) => stores.find((s) => s.id === id)?.name ?? id.slice(0, 8);
   const activeCount = staff.filter((s) => s.active).length;
+
+  const showCategoryAccess =
+    panel === "edit" && CATEGORY_RESTRICTED_ROLES.has(form.role);
 
   return (
     <section className="module">
@@ -303,7 +335,7 @@ export function StaffClient() {
                   </td>
                   <td>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button type="button" className="tableAction" onClick={() => openEdit(member)}>
+                      <button type="button" className="tableAction" onClick={() => void openEdit(member)}>
                         Edit
                       </button>
                       <button type="button" className="tableAction" onClick={() => openPin(member)}>
@@ -447,6 +479,48 @@ export function StaffClient() {
                       ))}
                     </div>
                     <small style={{ color: "var(--muted)" }}>Leave unselected to allow access to all stores.</small>
+                  </div>
+                ) : null}
+
+                {showCategoryAccess ? (
+                  <div className="fieldStack">
+                    <span>Category access</span>
+                    {categories.filter((c) => c.active).length === 0 ? (
+                      <small style={{ color: "var(--muted)" }}>
+                        No categories yet. Go to <strong>Products → Categories</strong> to create them, then return here to restrict access.
+                      </small>
+                    ) : (
+                      <>
+                        <div className="storeCheckboxes">
+                          {categories.filter((c) => c.active).map((cat) => (
+                            <label key={cat.id} className="checkboxRow">
+                              <input
+                                type="checkbox"
+                                checked={form.categoryIds.includes(cat.id)}
+                                onChange={() => toggleCategoryId(cat.id)}
+                              />
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                {cat.color && (
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      width: 10,
+                                      height: 10,
+                                      borderRadius: "50%",
+                                      background: cat.color
+                                    }}
+                                  />
+                                )}
+                                {cat.name}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        <small style={{ color: "var(--muted)" }}>
+                          Leave all unchecked to allow all categories. Check specific categories to restrict this staff member's register view.
+                        </small>
+                      </>
+                    )}
                   </div>
                 ) : null}
 

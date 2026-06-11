@@ -18,8 +18,35 @@ type OrgForm = {
   active: boolean;
 };
 
+type OrgStaffMember = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  role: string;
+  active: boolean;
+  pinLast4: string | null;
+};
+
+type StaffForm = {
+  name: string;
+  email: string;
+  role: string;
+  pin: string;
+};
+
+const STAFF_ROLES = [
+  { value: "organization_admin", label: "Organization Admin" },
+  { value: "store_manager", label: "Store Manager" },
+  { value: "cashier", label: "Cashier" },
+  { value: "accountant", label: "Accountant" }
+];
+
 function emptyForm(): OrgForm {
   return { name: "", type: "school", currency: "USD", taxEnabled: false, taxRateBps: "0", active: true };
+}
+
+function emptyStaffForm(): StaffForm {
+  return { name: "", email: "", role: "organization_admin", pin: "" };
 }
 
 function orgToForm(org: Organization): OrgForm {
@@ -43,6 +70,14 @@ export function OrganizationsClient() {
   const [form, setForm] = useState<OrgForm>(emptyForm());
   const [saving, setSaving] = useState(false);
 
+  // Staff management for selected org
+  const [orgStaff, setOrgStaff] = useState<OrgStaffMember[]>([]);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [showStaffForm, setShowStaffForm] = useState(false);
+  const [staffForm, setStaffForm] = useState<StaffForm>(emptyStaffForm());
+  const [savingStaff, setSavingStaff] = useState(false);
+  const [staffMessage, setStaffMessage] = useState<string | null>(null);
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -56,6 +91,19 @@ export function OrganizationsClient() {
     }
   }
 
+  async function loadOrgStaff(orgId: string) {
+    setStaffLoading(true);
+    setOrgStaff([]);
+    try {
+      const data = await apiGet<OrgStaffMember[]>(`/staff?organizationId=${orgId}`);
+      setOrgStaff(data);
+    } catch {
+      setOrgStaff([]);
+    } finally {
+      setStaffLoading(false);
+    }
+  }
+
   useEffect(() => {
     void load();
   }, []);
@@ -66,6 +114,9 @@ export function OrganizationsClient() {
     setCreating(true);
     setMessage(null);
     setError(null);
+    setOrgStaff([]);
+    setShowStaffForm(false);
+    setStaffMessage(null);
   }
 
   function startEdit(org: Organization) {
@@ -74,11 +125,16 @@ export function OrganizationsClient() {
     setForm(orgToForm(org));
     setMessage(null);
     setError(null);
+    setShowStaffForm(false);
+    setStaffMessage(null);
+    void loadOrgStaff(org.id);
   }
 
   function cancelForm() {
     setCreating(false);
     setEditing(null);
+    setOrgStaff([]);
+    setShowStaffForm(false);
   }
 
   function setField<K extends keyof OrgForm>(key: K, value: OrgForm[K]) {
@@ -98,6 +154,9 @@ export function OrganizationsClient() {
         });
         setMessage(`Created "${created.name}"`);
         setCreating(false);
+        setEditing(created);
+        setForm(orgToForm(created));
+        void loadOrgStaff(created.id);
       } else if (editing) {
         const updated = await apiPatch<Organization>(`/organizations/${editing.id}`, {
           name: form.name.trim(),
@@ -108,13 +167,38 @@ export function OrganizationsClient() {
           active: form.active
         });
         setMessage(`Saved "${updated.name}"`);
-        setEditing(null);
+        setEditing(updated);
       }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save organization");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveStaff() {
+    if (!editing) return;
+    if (!staffForm.name.trim() || staffForm.pin.length < 4) return;
+    setSavingStaff(true);
+    setStaffMessage(null);
+    try {
+      await apiPost("/staff", {
+        organizationId: editing.id,
+        name: staffForm.name.trim(),
+        email: staffForm.email.trim() || null,
+        role: staffForm.role,
+        pin: staffForm.pin,
+        storeIds: []
+      });
+      setStaffMessage(`${staffForm.name} added as ${staffForm.role.replace(/_/g, " ")}.`);
+      setShowStaffForm(false);
+      setStaffForm(emptyStaffForm());
+      void loadOrgStaff(editing.id);
+    } catch (err) {
+      setStaffMessage(err instanceof Error ? err.message : "Could not create staff member");
+    } finally {
+      setSavingStaff(false);
     }
   }
 
@@ -263,6 +347,106 @@ export function OrganizationsClient() {
                 Cancel
               </button>
             </div>
+
+            {/* Staff section — only shown when editing an existing org */}
+            {editing && (
+              <div className="orgStaffSection">
+                <div className="orgStaffHeader">
+                  <strong>Staff accounts</strong>
+                  <button
+                    type="button"
+                    className="btnSmall"
+                    onClick={() => { setShowStaffForm((v) => !v); setStaffMessage(null); setStaffForm(emptyStaffForm()); }}
+                  >
+                    {showStaffForm ? "Cancel" : "+ Add staff"}
+                  </button>
+                </div>
+
+                {staffMessage && (
+                  <p className={`buttonHelp${staffMessage.includes("Could not") ? "" : " success"}`}>
+                    {staffMessage}
+                  </p>
+                )}
+
+                {showStaffForm && (
+                  <div className="orgStaffForm">
+                    <label className="fieldStack">
+                      <span>Full name</span>
+                      <input
+                        autoFocus
+                        value={staffForm.name}
+                        onChange={(e) => setStaffForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="Jordan Lee"
+                      />
+                    </label>
+                    <label className="fieldStack">
+                      <span>Email (optional)</span>
+                      <input
+                        type="email"
+                        value={staffForm.email}
+                        onChange={(e) => setStaffForm((f) => ({ ...f, email: e.target.value }))}
+                        placeholder="jordan@school.edu"
+                      />
+                    </label>
+                    <label className="fieldStack">
+                      <span>Role</span>
+                      <select
+                        value={staffForm.role}
+                        onChange={(e) => setStaffForm((f) => ({ ...f, role: e.target.value }))}
+                      >
+                        {STAFF_ROLES.map((r) => (
+                          <option key={r.value} value={r.value}>{r.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="fieldStack">
+                      <span>PIN (4–8 digits)</span>
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        value={staffForm.pin}
+                        onChange={(e) => setStaffForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 8) }))}
+                        placeholder="e.g. 1234"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="primaryAction"
+                      onClick={() => void saveStaff()}
+                      disabled={savingStaff || !staffForm.name.trim() || staffForm.pin.length < 4}
+                    >
+                      {savingStaff ? "Adding..." : "Add staff member"}
+                    </button>
+                  </div>
+                )}
+
+                {staffLoading ? (
+                  <p className="emptyState" style={{ fontSize: "0.85rem" }}>Loading staff...</p>
+                ) : orgStaff.length === 0 ? (
+                  <p className="emptyState" style={{ fontSize: "0.85rem" }}>No staff yet. Add the first admin above.</p>
+                ) : (
+                  <div className="orgStaffList">
+                    {orgStaff.map((member) => (
+                      <div key={member.id} className="orgStaffRow">
+                        <div>
+                          <span className="orgStaffName">{member.name || "—"}</span>
+                          {member.email && <span className="orgStaffEmail">{member.email}</span>}
+                        </div>
+                        <div className="orgStaffRight">
+                          <span className="badge muted" style={{ fontSize: "0.72rem" }}>
+                            {member.role.replace(/_/g, " ")}
+                          </span>
+                          {!member.pinLast4 && (
+                            <span className="badge danger" style={{ fontSize: "0.72rem" }}>No PIN</span>
+                          )}
+                          <StatusBadge value={member.active ? "Active" : "Inactive"} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </aside>
         ) : null}
       </div>

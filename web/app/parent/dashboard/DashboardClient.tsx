@@ -32,12 +32,18 @@ type Student = {
   recentTransactions: Transaction[];
 };
 
+type NotificationPrefs = {
+  email_on_purchase: boolean;
+  low_balance_threshold_cents: number;
+};
+
 type GuardianMe = {
   id: string;
   name: string;
   email: string;
   organizationId: string;
   organizationName: string;
+  notificationPrefs: NotificationPrefs;
   students: Student[];
 };
 
@@ -94,6 +100,7 @@ export default function DashboardClient() {
 
   const [data, setData] = useState<GuardianMe | null>(null);
   const [error, setError] = useState("");
+  const [savingPrefs, setSavingPrefs] = useState(false);
 
   useEffect(() => {
     fetch("/api/v1/guardian-portal/me", { credentials: "include" })
@@ -110,6 +117,26 @@ export default function DashboardClient() {
       })
       .catch(() => setError("Error de conexión"));
   }, [orgId, router]);
+
+  async function toggleEmailOnPurchase() {
+    if (!data) return;
+    const newVal = !data.notificationPrefs.email_on_purchase;
+    setData((d) => d ? { ...d, notificationPrefs: { ...d.notificationPrefs, email_on_purchase: newVal } } : d);
+    setSavingPrefs(true);
+    try {
+      await fetch("/api/v1/guardian-portal/me/notifications", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailOnPurchase: newVal })
+      });
+    } catch {
+      // revert on failure
+      setData((d) => d ? { ...d, notificationPrefs: { ...d.notificationPrefs, email_on_purchase: !newVal } } : d);
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
 
   if (error) {
     return (
@@ -229,6 +256,28 @@ export default function DashboardClient() {
                 ))}
               </>
             )}
+
+            <p className="parentSectionTitle">Notificaciones</p>
+            <div className="parentNotifCard">
+              <div className="parentNotifRow">
+                <div className="parentNotifInfo">
+                  <span className="material-symbols-outlined">receipt_long</span>
+                  <div>
+                    <strong>Recibir comprobante por compra</strong>
+                    <p>Te enviamos un correo cada vez que se realice una compra con el saldo de tu hijo.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className={`parentToggle${data.notificationPrefs.email_on_purchase ? " parentToggle--on" : ""}`}
+                  onClick={toggleEmailOnPurchase}
+                  disabled={savingPrefs}
+                  aria-pressed={data.notificationPrefs.email_on_purchase}
+                >
+                  <span className="parentToggleThumb" />
+                </button>
+              </div>
+            </div>
           </>
         )}
       </main>

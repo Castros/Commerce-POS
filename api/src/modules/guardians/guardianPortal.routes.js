@@ -230,10 +230,16 @@ guardianPortalRouter.get(
   asyncHandler(async (req, res) => {
     const { guardianId, organizationId, name, email } = req.guardian;
 
-    const orgResult = await pool.query(
-      `SELECT name FROM commerce_organizations WHERE id = $1`,
-      [organizationId]
-    );
+    const [orgResult, prefsResult] = await Promise.all([
+      pool.query(
+        `SELECT name FROM commerce_organizations WHERE id = $1`,
+        [organizationId]
+      ),
+      pool.query(
+        `SELECT notification_prefs AS "notificationPrefs" FROM commerce_guardians WHERE id = $1`,
+        [guardianId]
+      )
+    ]);
 
     const studentsResult = await pool.query(
       `SELECT c.id, c.name, c.active,
@@ -296,9 +302,51 @@ guardianPortalRouter.get(
         email,
         organizationId,
         organizationName: orgResult.rows[0]?.name ?? "",
+        notificationPrefs: prefsResult.rows[0]?.notificationPrefs ?? { email_on_purchase: true, low_balance_threshold_cents: 500 },
         students
       }
     });
+  })
+);
+
+// ── Notification preferences ─────────────────────────────────────────────────
+
+guardianPortalRouter.patch(
+  "/me/notifications",
+  requireGuardianSession,
+  asyncHandler(async (req, res) => {
+    const body = z.object({
+      emailOnPurchase: z.boolean().optional(),
+      lowBalanceThresholdCents: z.number().int().min(0).optional()
+    }).parse(req.body);
+
+    const { guardianId } = req.guardian;
+
+    const updates = {};
+    if (body.emailOnPurchase !== undefined) updates.email_on_purchase = body.emailOnPurchase;
+    if (body.lowBalanceThresholdCents !== undefined) updates.low_balance_threshold_cents = body.lowBalanceThresholdCents;
+
+    if (Object.keys(updates).length === 0) {
+      res.json({ data: { ok: true } });
+      return;
+    }
+
+    // Merge patch into existing JSONB — only update provided keys
+    const setClauses = Object.keys(updates)
+      .map((k, i) => `jsonb_build_object('${k}', $${i + 2}::jsonb)`)
+      .join(" || ");
+    const values = [guardianId, ...Object.values(updates).map((v) => JSON.stringify(v))];
+
+    const result = await pool.query(
+      `UPDATE commerce_guardians
+       SET notification_prefs = notification_prefs || (${setClauses}),
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING notification_prefs AS "notificationPrefs"`,
+      values
+    );
+
+    res.json({ data: { notificationPrefs: result.rows[0]?.notificationPrefs } });
   })
 );
 

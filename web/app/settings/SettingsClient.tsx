@@ -29,6 +29,7 @@ export function SettingsClient() {
   const [currency, setCurrency] = useState("USD");
   const [taxEnabled, setTaxEnabled] = useState(false);
   const [taxRateBps, setTaxRateBps] = useState("0");
+  const [contactEmail, setContactEmail] = useState("");
 
   const [addingStore, setAddingStore] = useState(false);
   const [storeForm, setStoreForm] = useState<StoreForm>(emptyStoreForm());
@@ -45,6 +46,7 @@ export function SettingsClient() {
       setCurrency(organization.currency ?? "USD");
       setTaxEnabled(organization.taxEnabled ?? false);
       setTaxRateBps(String(organization.taxRateBps ?? 0));
+      setContactEmail(organization.contactEmail ?? "");
 
       const storeData = await apiGet<Store[]>(`/stores?organizationId=${organization.id}`);
       setStores(storeData);
@@ -70,7 +72,8 @@ export function SettingsClient() {
         type,
         currency,
         taxEnabled,
-        taxRateBps: parseInt(taxRateBps, 10) || 0
+        taxRateBps: parseInt(taxRateBps, 10) || 0,
+        contactEmail: contactEmail.trim() || null
       });
       setOrg(updated);
       setMessage("Settings saved.");
@@ -148,6 +151,19 @@ export function SettingsClient() {
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
+            </label>
+
+            <label>
+              <span>Contact email (reply-to for receipts)</span>
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="admin@yourschool.edu"
+              />
+              <small className="buttonHelp">
+                Parents can reply to receipts and reach you at this address.
+              </small>
             </label>
           </div>
 

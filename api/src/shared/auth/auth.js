@@ -194,3 +194,21 @@ export async function authorizeStore(actor, organizationId, storeId) {
   );
   if (result.rowCount === 0) throw forbidden("Not assigned to this store");
 }
+
+const CATEGORY_UNRESTRICTED_ROLES = new Set([
+  "platform_admin", "super_admin", "organization_owner", "organization_admin", "service"
+]);
+
+// Returns null (unrestricted) or an array of permitted category UUIDs.
+// Zero rows in the permissions table = unrestricted (same as current behavior).
+export async function loadActorCategoryRestrictions(organizationId, actorUserId, actorRole) {
+  if (!actorUserId || CATEGORY_UNRESTRICTED_ROLES.has(actorRole)) return null;
+  const result = await pool.query(
+    `SELECT category_id AS "categoryId"
+     FROM commerce_user_category_permissions
+     WHERE organization_id = $1 AND user_id = $2`,
+    [organizationId, actorUserId]
+  );
+  if (result.rowCount === 0) return null;
+  return result.rows.map((r) => r.categoryId);
+}

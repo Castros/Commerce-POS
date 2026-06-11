@@ -1,5 +1,7 @@
 import { withTransaction } from "../../db/transaction.js";
 import { insertAuditEvent } from "../../shared/audit/audit.js";
+import { loadActorCategoryRestrictions } from "../../shared/auth/auth.js";
+import { sendReceiptEmail } from "../../shared/email/receiptEmail.js";
 import { badRequest, conflict, notFound, paymentRequired } from "../../shared/http/errors.js";
 import {
   hashRequestBody,
@@ -63,7 +65,7 @@ function buildReceipt({ order, items, payment, wallet, inventoryMovements = [], 
   return receipt;
 }
 
-async function loadStoreAndItems(client, body) {
+async function loadStoreAndItems(client, body, allowedCategoryIds = null) {
   const storeResult = await client.query(
     `
       SELECT id
@@ -97,6 +99,13 @@ async function loadStoreAndItems(client, body) {
   }
 
   const productIds = body.items.map((item) => item.productId);
+  const values = [body.organizationId, productIds, body.storeId];
+  let categoryClause = "";
+  if (allowedCategoryIds !== null) {
+    values.push(allowedCategoryIds);
+    categoryClause = `AND (category_id IS NULL OR category_id = ANY($${values.length}::uuid[]))`;
+  }
+
   const productResult = await client.query(
     `
       SELECT id, name, price_cents, currency
@@ -104,13 +113,15 @@ async function loadStoreAndItems(client, body) {
       WHERE organization_id = $1
         AND id = ANY($2::uuid[])
         AND active = TRUE
+        AND is_virtual = FALSE
         AND (store_id = $3 OR store_id IS NULL)
+        ${categoryClause}
     `,
-    [body.organizationId, productIds, body.storeId]
+    values
   );
 
   if (productResult.rowCount !== productIds.length) {
-    throw notFound("One or more products were not found for this store");
+    throw notFound("One or more products were not found or are not available to this cashier");
   }
 
   const productsById = new Map(productResult.rows.map((row) => [row.id, row]));
@@ -391,7 +402,10 @@ export async function createPaidSale({
       };
     }
 
-    const { items, subtotalCents } = await loadStoreAndItems(client, body);
+    const allowedCategoryIds = await loadActorCategoryRestrictions(
+      body.organizationId, actorUserId, null
+    );
+    const { items, subtotalCents } = await loadStoreAndItems(client, body, allowedCategoryIds);
     const { order, createdItems, payment, totalCents } = await insertPaidOrder(client, {
       body,
       items,
@@ -433,21 +447,31 @@ export async function createPaidSale({
       userAgent
     });
 
-    const responseBody = {
-      data: buildReceipt({
-        order,
-        items: createdItems,
-        payment,
-        inventoryMovements,
-        cashDrawer
-      })
-    };
+    const receipt = buildReceipt({
+      order,
+      items: createdItems,
+      payment,
+      inventoryMovements,
+      cashDrawer
+    });
+
+    const responseBody = { data: receipt };
 
     await storeIdempotentResponse(client, {
       organizationId: body.organizationId,
       idempotencyKey,
       status: 201,
       body: responseBody
+    });
+
+    setImmediate(() => {
+      void sendReceiptEmail({
+        organizationId: body.organizationId,
+        order: receipt.order,
+        items: receipt.items,
+        payment: receipt.payment,
+        wallet: null
+      });
     });
 
     return {
@@ -521,6 +545,15 @@ export async function createWalletSale({
     }
 
     const productIds = body.items.map((item) => item.productId);
+    const allowedCategoryIds = await loadActorCategoryRestrictions(
+      body.organizationId, actorUserId, null
+    );
+    const productValues = [body.organizationId, productIds, body.storeId];
+    let walletCategoryClause = "";
+    if (allowedCategoryIds !== null) {
+      productValues.push(allowedCategoryIds);
+      walletCategoryClause = `AND (category_id IS NULL OR category_id = ANY($${productValues.length}::uuid[]))`;
+    }
     const productResult = await client.query(
       `
         SELECT id, name, price_cents, currency
@@ -528,13 +561,15 @@ export async function createWalletSale({
         WHERE organization_id = $1
           AND id = ANY($2::uuid[])
           AND active = TRUE
+          AND is_virtual = FALSE
           AND (store_id = $3 OR store_id IS NULL)
+          ${walletCategoryClause}
       `,
-      [body.organizationId, productIds, body.storeId]
+      productValues
     );
 
     if (productResult.rowCount !== productIds.length) {
-      throw notFound("One or more products were not found for this store");
+      throw notFound("One or more products were not found or are not available to this cashier");
     }
 
     const productsById = new Map(productResult.rows.map((row) => [row.id, row]));
@@ -722,6 +757,16 @@ export async function createWalletSale({
       idempotencyKey,
       status: 201,
       body: responseBody
+    });
+
+    setImmediate(() => {
+      void sendReceiptEmail({
+        organizationId: body.organizationId,
+        order: receipt.order,
+        items: receipt.items,
+        payment: receipt.payment,
+        wallet: receipt.wallet
+      });
     });
 
     return {
@@ -1072,6 +1117,14 @@ export async function refundOrder({
         [body.organizationId, order.id]
       )
     ).rows[0];
+
+    // Reset any fee assignments paid by this order back to pending
+    await client.query(
+      `UPDATE commerce_fee_assignments
+       SET status = 'pending', paid_order_id = NULL, paid_at = NULL, updated_at = NOW()
+       WHERE organization_id = $1 AND paid_order_id = $2 AND status = 'paid'`,
+      [body.organizationId, order.id]
+    );
 
     await insertAuditEvent(client, {
       organizationId: body.organizationId,

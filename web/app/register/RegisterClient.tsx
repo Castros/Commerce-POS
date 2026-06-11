@@ -6,6 +6,7 @@ import { apiGet, apiPost } from "../lib/api";
 import type {
   DemoSchoolData,
   DemoStudent,
+  FeeAssignment,
   Product,
   Receipt,
   StudentAppSearchResult
@@ -93,6 +94,8 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
   const [serialMessage, setSerialMessage] = useState<string | null>(null);
   const [productSearch, setProductSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [pendingFees, setPendingFees] = useState<FeeAssignment[]>([]);
+  const [collectingFeeId, setCollectingFeeId] = useState<string | null>(null);
 
   async function loadRegisterData() {
     setLoading(true);
@@ -147,6 +150,38 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
     () => demo?.students.find((student) => student.id === selectedStudentId) || null,
     [demo, selectedStudentId]
   );
+
+  useEffect(() => {
+    if (!selectedStudentId || !demo) {
+      setPendingFees([]);
+      return;
+    }
+    void apiGet<FeeAssignment[]>(
+      `/fee-assignments?organizationId=${demo.organization.id}&storeId=${demo.store.id}&customerId=${selectedStudentId}&status=pending`
+    ).then(setPendingFees).catch(() => setPendingFees([]));
+  }, [selectedStudentId, demo?.organization.id]);
+
+  async function collectFee(feeId: string) {
+    if (!demo || !selectedStudent) return;
+    setCollectingFeeId(feeId);
+    try {
+      await apiPost(
+        `/fee-assignments/${feeId}/pay`,
+        {
+          organizationId: demo.organization.id,
+          storeId: demo.store.id,
+          paymentMethod,
+          ...(paymentMethod === "wallet" ? { walletAccountId: selectedStudent.wallet.id } : {})
+        },
+        { "Idempotency-Key": `fee-${feeId}-${Date.now()}` }
+      );
+      setPendingFees((fees) => fees.filter((f) => f.id !== feeId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not collect fee");
+    } finally {
+      setCollectingFeeId(null);
+    }
+  }
 
   const subtotalCents = cart.reduce(
     (sum, line) => sum + toCents(line.product.priceCents) * line.quantity,
@@ -646,6 +681,9 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
             onCompleteSale={() => {
               void completeSale();
             }}
+            pendingFees={pendingFees}
+            collectingFeeId={collectingFeeId}
+            onCollectFee={(feeId) => void collectFee(feeId)}
           />
         </aside>
       </div>

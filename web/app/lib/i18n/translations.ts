@@ -15,6 +15,7 @@ const en = {
     organizations: "Organizations",
     staff: "Staff",
     settings: "Settings",
+    fees: "Fees",
     guardians: "Parents / Guardians"
   },
   shell: {
@@ -255,6 +256,7 @@ const es: typeof en = {
     organizations: "Organizaciones",
     staff: "Personal",
     settings: "Configuración",
+    fees: "Cobros",
     guardians: "Padres / Tutores"
   },
   shell: {

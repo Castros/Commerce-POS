@@ -1,6 +1,8 @@
 import { Router } from "express";
 
 import { aiRouter } from "./modules/ai/ai.routes.js";
+import { feeAssignmentsRouter } from "./modules/feeAssignments/feeAssignments.routes.js";
+import { productCategoriesRouter } from "./modules/productCategories/productCategories.routes.js";
 import { uploadsRouter } from "./modules/uploads/uploads.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { guardiansRouter } from "./modules/guardians/guardians.routes.js";
@@ -30,6 +32,8 @@ apiRouter.use("/guardian-portal", guardianPortalRouter); // parent-facing, own a
 apiRouter.use(authenticateRequest);
 
 apiRouter.use("/organizations", organizationsRouter);
+apiRouter.use("/product-categories", productCategoriesRouter);
+apiRouter.use("/fee-assignments", feeAssignmentsRouter);
 apiRouter.use("/cash-drawers", cashDrawersRouter);
 apiRouter.use("/stores", storesRouter);
 apiRouter.use("/products", productsRouter);

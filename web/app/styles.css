@@ -691,6 +691,79 @@ select {
   padding: 16px;
 }
 
+/* ── Org staff section (inside Organizations detail panel) ── */
+
+.orgStaffSection {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.orgStaffHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.orgStaffHeader strong {
+  font-size: 0.9rem;
+}
+
+.orgStaffForm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.orgStaffList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.orgStaffRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.orgStaffRow:last-child {
+  border-bottom: none;
+}
+
+.orgStaffName {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.orgStaffEmail {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.orgStaffRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .credentialList {
   display: grid;
   gap: 10px;
@@ -2909,6 +2982,310 @@ dd {
 .productInitials--purple { background: #7c3aed; }
 .productInitials--teal  { background: #0d9488; }
 
+/* ── Product / Category tabs ── */
+
+.productTabBar {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+.productTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.productTab:hover {
+  color: var(--text);
+}
+
+.productTab--active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.productTabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--border);
+  color: var(--muted);
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+}
+
+/* ── Category admin layout ── */
+
+.categoryAdminLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 820px;
+}
+
+.categoryFormPanel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.categoryFormPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.categoryFormPanelHeader strong {
+  font-size: 0.95rem;
+}
+
+.categoryFormClose {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 1rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.categoryFormClose:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.categoryColorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.categoryColorSwatch {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ── Category list ── */
+
+.categoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.categoryListRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+
+.categoryListRow:last-child {
+  border-bottom: none;
+}
+
+.categoryListRow--inactive {
+  opacity: 0.55;
+}
+
+.categoryListLeft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.categoryColorDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.categoryColorDot--empty {
+  background: var(--border);
+}
+
+.categoryListMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.categoryListName {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.categoryListDesc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.categoryListRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Pending fees panel in register cart ── */
+
+.pendingFeesPanel {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pendingFeesTitle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #92400e;
+  margin: 0 0 4px;
+}
+
+.pendingFeeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pendingFeeMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pendingFeeDesc {
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pendingFeeDue {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.pendingFeeRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pendingFeeCollect {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  border-radius: 6px;
+}
+
+/* ── Fee student search dropdown ── */
+
+.feeStudentDropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 2px;
+}
+
+.feeStudentOption {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--text);
+  transition: background 0.1s;
+}
+
+.feeStudentOption:last-child {
+  border-bottom: none;
+}
+
+.feeStudentOption:hover {
+  background: var(--hover);
+}
+
+/* ── Small button variant ── */
+
+.btnSmall {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.1s;
+}
+
+.btnSmall:hover {
+  background: var(--border);
+}
+
 /* ── Primary button variant ── */
 
 .btnPrimary {
@@ -4763,3 +5140,70 @@ dd {
   flex-shrink: 0;
   background: #e5e7eb;
 }
+
+/* Parent portal — notification settings */
+.parentNotifCard {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.parentNotifRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.parentNotifInfo {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.parentNotifInfo .material-symbols-outlined {
+  font-size: 22px;
+  color: #6b7280;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.parentNotifInfo strong {
+  display: block;
+  font-size: 0.875rem;
+  color: #111827;
+  margin-bottom: 2px;
+}
+.parentNotifInfo p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+/* Toggle switch */
+.parentToggle {
+  flex-shrink: 0;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  background: #d1d5db;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  padding: 0;
+}
+.parentToggle--on { background: #2563eb; }
+.parentToggle:disabled { opacity: 0.6; cursor: not-allowed; }
+.parentToggleThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.2s;
+  display: block;
+}
+.parentToggle--on .parentToggleThumb { transform: translateX(20px); }
