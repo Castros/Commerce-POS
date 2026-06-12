@@ -1,10 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
+import multer from "multer";
+import { parse as parseCsv } from "csv-parse/sync";
 
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { authorizeTenant, getActor, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, notFound, parseZod } from "../../shared/http/errors.js";
+
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 export const employeesRouter = Router();
 
@@ -426,5 +430,136 @@ employeesRouter.post(
     }
 
     res.json({ data: { imported, updated, errors } });
+  })
+);
+
+// ── CSV import (preview + apply, multipart) ───────────────────────────────────
+
+const csvEmpRowSchema = z.object({
+  name:             z.string().min(1),
+  email:            z.string().email().optional().or(z.literal("")),
+  department:       z.string().optional(),
+  job_title:        z.string().optional(),
+  employee_number:  z.string().optional(),
+  deduction_cycle:  z.enum(["weekly", "biweekly", "monthly"]).optional().default("biweekly"),
+});
+
+function parseCsvRows(buffer) {
+  return parseCsv(buffer.toString("utf8"), { columns: true, skip_empty_lines: true, trim: true });
+}
+
+employeesRouter.post(
+  "/import/preview",
+  requirePermission("customers:write"),
+  csvUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    const rows = parseCsvRows(req.file.buffer);
+    if (rows.length > 500) throw badRequest("Maximum 500 rows per import");
+
+    const preview = [];
+    const errors = [];
+
+    // Bulk-fetch existing employee numbers
+    const empNumbers = rows.map((r) => r.employee_number).filter(Boolean);
+    const existing = empNumbers.length
+      ? (await pool.query(
+          `SELECT ep.employee_number FROM commerce_employee_profiles ep
+           JOIN commerce_customers c ON c.id = ep.customer_id AND c.organization_id = ep.organization_id
+           WHERE ep.organization_id = $1 AND ep.employee_number = ANY($2)`,
+          [organizationId, empNumbers]
+        )).rows.map((r) => r.employee_number)
+      : [];
+    const existingSet = new Set(existing);
+
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = csvEmpRowSchema.safeParse(rows[i]);
+      if (!parsed.success) {
+        errors.push({ row: i + 2, error: parsed.error.issues[0]?.message ?? "Invalid row" });
+        continue;
+      }
+      const r = parsed.data;
+      const action = r.employee_number && existingSet.has(r.employee_number) ? "update" : "create";
+      preview.push({
+        row: i + 2,
+        name: r.name,
+        email: r.email || null,
+        department: r.department || null,
+        jobTitle: r.job_title || null,
+        employeeNumber: r.employee_number || null,
+        deductionCycle: r.deduction_cycle,
+        action,
+      });
+    }
+
+    res.json({ data: { total: rows.length, valid: preview.length, errors, preview } });
+  })
+);
+
+employeesRouter.post(
+  "/import/apply",
+  requirePermission("customers:write"),
+  csvUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    const rows = parseCsvRows(req.file.buffer);
+    if (rows.length > 500) throw badRequest("Maximum 500 rows per import");
+
+    let created = 0, updated = 0;
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = csvEmpRowSchema.safeParse(rows[i]);
+      if (!parsed.success) { errors.push({ row: i + 2, error: parsed.error.issues[0]?.message ?? "Invalid row" }); continue; }
+      const r = parsed.data;
+      try {
+        await withTransaction(async (client) => {
+          let customerId = null;
+          if (r.employee_number) {
+            const existing = (await client.query(
+              `SELECT c.id FROM commerce_customers c
+               JOIN commerce_employee_profiles ep ON ep.customer_id = c.id AND ep.organization_id = c.organization_id
+               WHERE c.organization_id = $1 AND ep.employee_number = $2`,
+              [organizationId, r.employee_number]
+            )).rows[0];
+            if (existing) customerId = existing.id;
+          }
+
+          if (customerId) {
+            await client.query(
+              `UPDATE commerce_customers SET name = $2, email = COALESCE($3, email) WHERE id = $1`,
+              [customerId, r.name, r.email || null]
+            );
+            await client.query(
+              `UPDATE commerce_employee_profiles SET department = COALESCE($2, department), job_title = COALESCE($3, job_title), deduction_cycle = $4 WHERE customer_id = $1`,
+              [customerId, r.department || null, r.job_title || null, r.deduction_cycle]
+            );
+            updated++;
+          } else {
+            const ins = await client.query(
+              `INSERT INTO commerce_customers (organization_id, name, email, customer_type) VALUES ($1, $2, $3, 'employee') RETURNING id`,
+              [organizationId, r.name, r.email || null]
+            );
+            customerId = ins.rows[0].id;
+            await client.query(
+              `INSERT INTO commerce_employee_profiles (organization_id, customer_id, employee_number, department, job_title, deduction_cycle, payroll_deduction_enabled, max_credit_cents)
+               VALUES ($1, $2, $3, $4, $5, $6, true, 50000)`,
+              [organizationId, customerId, r.employee_number || null, r.department || null, r.job_title || null, r.deduction_cycle]
+            );
+            created++;
+          }
+        });
+      } catch (err) {
+        errors.push({ row: i + 2, name: r.name, error: err.message });
+      }
+    }
+
+    res.json({ data: { created, updated, errors } });
   })
 );

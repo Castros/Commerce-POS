@@ -1,6 +1,23 @@
 # AI Feature Strategy
 
-Date: 2026-06-04
+Date: 2026-06-12 (updated)
+
+## Implementation Status
+
+| Feature | Status | Endpoint |
+|---|---|---|
+| Daily Closeout Summary | **Live** | `POST /v1/ai/summaries` — auto-fires on drawer close |
+| Anomaly Alerts | **Live** | `POST /v1/ai/alerts/scan` — on-demand, date-range aware |
+| Sales Forecast | **Live** | `POST /v1/ai/forecast` |
+| Inventory Reorder Assistant | **Live** | `POST /v1/ai/reorder` |
+| Guardian Spending Digest | **Live** | `POST /v1/ai/guardian-digest` — sends email via Resend |
+| AI Usage Tracking | **Live** | `GET /v1/ai/usage` — platform admin only |
+| Receipt & Invoice Extraction | Planned | — |
+
+**Model:** `claude-haiku-4-5` (~$0.001 per closeout summary)
+**Cost tracking:** every AI call stores `cost_microdollars` on `commerce_ai_records`. Token/cost data is gated to platform admin via `/v1/ai/usage` — never exposed to org users.
+
+---
 
 ## Summary
 

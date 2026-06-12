@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
 type Props = {
   currentUrl?: string | null;
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export default function ProductImageUpload({ currentUrl, organizationId, onUploaded }: Props) {
+  const { t } = useLanguage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -17,8 +19,8 @@ export default function ProductImageUpload({ currentUrl, organizationId, onUploa
   const displayUrl = preview ?? currentUrl ?? null;
 
   async function handleFile(file: File) {
-    if (!file.type.startsWith("image/")) { setError("Images only"); return; }
-    if (file.size > 10 * 1024 * 1024) { setError("Max 10 MB"); return; }
+    if (!file.type.startsWith("image/")) { setError(t("products.image.imagesOnly")); return; }
+    if (file.size > 10 * 1024 * 1024) { setError(t("products.image.maxSize")); return; }
 
     setError("");
     setBusy(true);
@@ -28,7 +30,7 @@ export default function ProductImageUpload({ currentUrl, organizationId, onUploa
         `/api/v1/uploads/signature?folder=product&organizationId=${organizationId}`,
         { credentials: "include" }
       );
-      if (!sigRes.ok) throw new Error("Could not get upload credentials");
+      if (!sigRes.ok) throw new Error(t("products.image.credentialError"));
       const { data: sig } = await sigRes.json() as { data: { signature: string; timestamp: number; api_key: string; cloud_name: string; folder: string; upload_preset: string } };
 
       const form = new FormData();
@@ -43,13 +45,13 @@ export default function ProductImageUpload({ currentUrl, organizationId, onUploa
         `https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,
         { method: "POST", body: form }
       );
-      if (!cldRes.ok) throw new Error("Upload failed");
+      if (!cldRes.ok) throw new Error(t("products.image.uploadFailed"));
       const cldData = await cldRes.json() as { secure_url: string };
 
       setPreview(cldData.secure_url);
       onUploaded(cldData.secure_url);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : t("products.image.uploadFailed"));
     } finally {
       setBusy(false);
     }
@@ -63,14 +65,14 @@ export default function ProductImageUpload({ currentUrl, organizationId, onUploa
         role="button"
         tabIndex={0}
         onKeyDown={(e) => e.key === "Enter" && !busy && inputRef.current?.click()}
-        title="Click to upload product image"
+        title={t("products.image.clickHint")}
       >
         {displayUrl ? (
           <img src={displayUrl} alt="Product" className="productImageUploadPreview" />
         ) : (
           <div className="productImageUploadPlaceholder">
             <span className="material-symbols-outlined">add_photo_alternate</span>
-            <span>Upload photo</span>
+            <span>{t("products.image.upload")}</span>
           </div>
         )}
         <div className="productImageUploadOverlay">

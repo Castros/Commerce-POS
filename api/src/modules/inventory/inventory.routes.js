@@ -1,7 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
+import { parse } from "csv-parse/sync";
+import multer from "multer";
 
 import { pool } from "../../db/client.js";
+import { withTransaction } from "../../db/transaction.js";
 import { authorizeTenant, authorizeStore, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, notFound, parseZod } from "../../shared/http/errors.js";
 
@@ -171,5 +174,290 @@ inventoryRouter.post(
     } finally {
       client.release();
     }
+  })
+);
+
+// ── CSV Import ────────────────────────────────────────────────────────────────
+
+const inventoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    const ok =
+      file.mimetype === "text/csv" ||
+      file.mimetype === "application/vnd.ms-excel" ||
+      file.originalname.toLowerCase().endsWith(".csv");
+    if (!ok) return cb(new Error("Only .csv files are accepted"));
+    cb(null, true);
+  },
+});
+
+const INVENTORY_CSV_ROW_SCHEMA = z.object({
+  sku:               z.string().min(1, "sku is required"),
+  quantity:          z.string().min(1, "quantity is required"),
+  reorder_threshold: z.string().optional(),
+  store_name:        z.string().optional(),
+});
+
+function parseInventoryCsvRows(buffer) {
+  const text = buffer.toString("utf8").replace(/^﻿/, ""); // strip BOM
+  return parse(text, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  });
+}
+
+function parseNonNegativeInt(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = parseInt(String(value), 10);
+  if (!Number.isInteger(n) || n < 0) return null;
+  return n;
+}
+
+// POST /v1/inventory/import/preview
+inventoryRouter.post(
+  "/import/preview",
+  requirePermission("products:write"),
+  inventoryUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    let rawRows;
+    try {
+      rawRows = parseInventoryCsvRows(req.file.buffer);
+    } catch {
+      throw badRequest("Could not parse CSV — check the file format");
+    }
+
+    if (rawRows.length === 0) throw badRequest("CSV has no data rows");
+    if (rawRows.length > 500) throw badRequest("Max 500 rows per import");
+
+    // Load all active products for this org (keyed by SKU)
+    const productsResult = await pool.query(
+      `SELECT id, name, sku FROM commerce_products
+       WHERE organization_id = $1 AND active = TRUE AND sku IS NOT NULL`,
+      [organizationId]
+    );
+    const productBySku = new Map(
+      productsResult.rows.map((p) => [p.sku.toLowerCase().trim(), p])
+    );
+
+    // Load all stores for this org (keyed by name, case-insensitive)
+    const storesResult = await pool.query(
+      `SELECT id, name FROM commerce_stores WHERE organization_id = $1`,
+      [organizationId]
+    );
+    const storeByName = new Map(
+      storesResult.rows.map((s) => [s.name.toLowerCase().trim(), s])
+    );
+
+    const preview = [];
+    const errors = [];
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const rowNum = i + 2;
+      const parsed = INVENTORY_CSV_ROW_SCHEMA.safeParse(rawRows[i]);
+
+      if (!parsed.success) {
+        errors.push({ row: rowNum, error: parsed.error.issues[0]?.message ?? "Invalid row" });
+        continue;
+      }
+
+      const r = parsed.data;
+      const quantity = parseNonNegativeInt(r.quantity);
+      if (quantity === null) {
+        errors.push({ row: rowNum, error: `Invalid quantity: "${r.quantity}" — must be a non-negative integer` });
+        continue;
+      }
+
+      const reorderThreshold = r.reorder_threshold?.trim()
+        ? parseNonNegativeInt(r.reorder_threshold)
+        : null;
+      if (r.reorder_threshold?.trim() && reorderThreshold === null) {
+        errors.push({ row: rowNum, error: `Invalid reorder_threshold: "${r.reorder_threshold}" — must be a non-negative integer` });
+        continue;
+      }
+
+      const skuKey = r.sku.toLowerCase().trim();
+      const product = productBySku.get(skuKey);
+      const productFound = product !== undefined;
+
+      const storeNameRaw = r.store_name?.trim() || null;
+      let storeFound = null;
+      let storeId = null;
+      if (storeNameRaw) {
+        const store = storeByName.get(storeNameRaw.toLowerCase());
+        storeFound = store !== undefined;
+        storeId = store?.id ?? null;
+      }
+
+      preview.push({
+        row: rowNum,
+        sku: r.sku.trim(),
+        productName: product?.name ?? null,
+        storeName: storeNameRaw,
+        quantity,
+        reorderThreshold,
+        productFound,
+        storeFound,
+        action: productFound ? "set" : "skip",
+      });
+    }
+
+    res.json({
+      data: {
+        total: rawRows.length,
+        valid: preview.length,
+        errors,
+        preview,
+      },
+    });
+  })
+);
+
+// POST /v1/inventory/import/apply
+inventoryRouter.post(
+  "/import/apply",
+  requirePermission("products:write"),
+  inventoryUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    let rawRows;
+    try {
+      rawRows = parseInventoryCsvRows(req.file.buffer);
+    } catch {
+      throw badRequest("Could not parse CSV");
+    }
+
+    if (rawRows.length === 0) throw badRequest("CSV has no data rows");
+    if (rawRows.length > 500) throw badRequest("Max 500 rows per import");
+
+    const results = { set: 0, skipped: 0, errors: [] };
+
+    await withTransaction(async (client) => {
+      // Load all active products for this org (keyed by SKU)
+      const productsResult = await client.query(
+        `SELECT id, name, sku, store_id AS "storeId"
+         FROM commerce_products
+         WHERE organization_id = $1 AND active = TRUE AND sku IS NOT NULL`,
+        [organizationId]
+      );
+      const productBySku = new Map(
+        productsResult.rows.map((p) => [p.sku.toLowerCase().trim(), p])
+      );
+
+      // Load all stores for this org (keyed by name, case-insensitive)
+      const storesResult = await client.query(
+        `SELECT id, name FROM commerce_stores WHERE organization_id = $1`,
+        [organizationId]
+      );
+      const storeByName = new Map(
+        storesResult.rows.map((s) => [s.name.toLowerCase().trim(), s])
+      );
+      const allStoreIds = storesResult.rows.map((s) => s.id);
+
+      for (let i = 0; i < rawRows.length; i++) {
+        const rowNum = i + 2;
+        const parsed = INVENTORY_CSV_ROW_SCHEMA.safeParse(rawRows[i]);
+
+        if (!parsed.success) {
+          results.errors.push({ row: rowNum, error: parsed.error.issues[0]?.message ?? "Invalid row" });
+          continue;
+        }
+
+        const r = parsed.data;
+        const quantity = parseNonNegativeInt(r.quantity);
+        if (quantity === null) {
+          results.errors.push({ row: rowNum, error: `Invalid quantity: "${r.quantity}"` });
+          continue;
+        }
+
+        const reorderThreshold = r.reorder_threshold?.trim()
+          ? parseNonNegativeInt(r.reorder_threshold)
+          : null;
+        if (r.reorder_threshold?.trim() && reorderThreshold === null) {
+          results.errors.push({ row: rowNum, error: `Invalid reorder_threshold: "${r.reorder_threshold}"` });
+          continue;
+        }
+
+        const skuKey = r.sku.toLowerCase().trim();
+        const product = productBySku.get(skuKey);
+
+        if (!product) {
+          results.skipped++;
+          continue;
+        }
+
+        // Determine target stores
+        const storeNameRaw = r.store_name?.trim() || null;
+        let targetStoreIds;
+        if (storeNameRaw) {
+          const store = storeByName.get(storeNameRaw.toLowerCase());
+          if (!store) {
+            results.errors.push({ row: rowNum, error: `Store not found: "${storeNameRaw}"` });
+            continue;
+          }
+          targetStoreIds = [store.id];
+        } else {
+          // Apply to all stores for the org (or to the product's store if set)
+          targetStoreIds = product.storeId ? [product.storeId] : allStoreIds;
+          // If no stores exist, skip with an informational note
+          if (targetStoreIds.length === 0) {
+            results.errors.push({ row: rowNum, error: `No stores found for org; specify store_name or create a store first` });
+            continue;
+          }
+        }
+
+        try {
+          for (const storeId of targetStoreIds) {
+            // Get current quantity_on_hand (0 if no row yet)
+            const currentResult = await client.query(
+              `SELECT COALESCE(quantity_on_hand, 0) AS qty
+               FROM commerce_inventory_items
+               WHERE organization_id = $1 AND store_id = $2 AND product_id = $3`,
+              [organizationId, storeId, product.id]
+            );
+            const oldQty = currentResult.rowCount > 0 ? Number(currentResult.rows[0].qty) : 0;
+            const delta = quantity - oldQty;
+
+            // Upsert inventory item
+            await client.query(
+              `INSERT INTO commerce_inventory_items
+                 (organization_id, store_id, product_id, quantity_on_hand, track_inventory
+                  ${reorderThreshold !== null ? ", reorder_threshold" : ""})
+               VALUES ($1, $2, $3, $4, TRUE
+                  ${reorderThreshold !== null ? ", $5" : ""})
+               ON CONFLICT (organization_id, store_id, product_id) DO UPDATE
+                 SET quantity_on_hand = EXCLUDED.quantity_on_hand,
+                     track_inventory  = TRUE,
+                     updated_at       = NOW()
+                     ${reorderThreshold !== null ? ", reorder_threshold = EXCLUDED.reorder_threshold" : ""}`,
+              reorderThreshold !== null
+                ? [organizationId, storeId, product.id, quantity, reorderThreshold]
+                : [organizationId, storeId, product.id, quantity]
+            );
+
+            // Record adjustment movement
+            await client.query(
+              `INSERT INTO commerce_inventory_movements
+                 (organization_id, store_id, product_id, type, quantity_delta, quantity_after, note)
+               VALUES ($1, $2, $3, 'adjustment', $4, $5, 'CSV import')`,
+              [organizationId, storeId, product.id, delta, quantity]
+            );
+          }
+          results.set++;
+        } catch (err) {
+          results.errors.push({ row: rowNum, sku: r.sku, error: err.message });
+        }
+      }
+    });
+
+    res.json({ data: results });
   })
 );

@@ -1,336 +1,594 @@
 # AGENTS.md - Commerce POS
 
-Read this before changing code in this repository.
+This file is for AI agents and developers picking up the Commerce POS codebase. Read it before writing code.
 
-## What This Project Is
+## Product Summary
 
-Commerce POS is a separate product/service for:
+Commerce POS is a standalone commerce and point-of-sale SaaS product. It began as a school cafeteria/student wallet idea but is now its own service, sold to schools, restaurants, and retail businesses.
 
-- School cafeteria POS
-- Student wallets
-- Uniforms, books, supplies, fees, and marketplace sales
-- Future restaurant and retail POS use cases
-- API-based integration back to the Spelling App
+It supports:
 
-This is intentionally separate from the educational spelling app. Do not move POS ownership back into the spelling app or expand legacy `cafeteria_*` concepts there.
+- Cafeteria POS with wallet, cash, and card checkout
+- Student wallets with credit limits and guardian top-up
+- Uniform/book/supply sales
+- School marketplace listings
+- Fee and event sales
+- Guardian (parent) portal with purchase notifications
+- Future restaurant and retail customers
 
-## Current Architecture
+The Spelling App owns education data. Commerce POS owns commerce data. Integration happens through APIs, service tokens, and external ID mappings.
 
-The project is a modular monolith:
+---
+
+## Repository Layout
 
 ```text
-api/                 Express API, raw SQL, migrations
-web/                 Next.js operator/admin UI
-docs/                Product, architecture, security, and API docs
-docker-compose.yml   Local Postgres/API/web stack
+.
+├── api/
+│   ├── src/
+│   │   ├── app.js
+│   │   ├── server.js
+│   │   ├── routes.js
+│   │   ├── db/
+│   │   │   ├── client.js
+│   │   │   ├── migrate.js
+│   │   │   ├── transaction.js
+│   │   │   └── migrations/
+│   │   ├── modules/
+│   │   │   ├── ai/              ← closeout summaries, anomaly alerts, forecasts, reorder, guardian digest
+│   │   │   ├── cashDrawers/
+│   │   │   ├── customers/
+│   │   │   ├── demo/
+│   │   │   ├── fees/            ← fee assignment CRUD + register pay flow
+│   │   │   ├── guardians/       ← guardian CRUD + guardian portal auth + notification prefs
+│   │   │   ├── integrations/
+│   │   │   ├── inventory/
+│   │   │   ├── orders/
+│   │   │   ├── organizations/
+│   │   │   ├── products/
+│   │   │   ├── reports/
+│   │   │   ├── staff/
+│   │   │   ├── stores/
+│   │   │   ├── studentCredentials/
+│   │   │   └── wallets/
+│   │   └── shared/
+│   │       ├── ai/              ← Anthropic SDK client, prompt builders
+│   │       ├── audit/
+│   │       ├── auth/
+│   │       ├── email/           ← Resend client, receipt email, invite/magic-link builders
+│   │       ├── http/
+│   │       └── idempotency/
+│   ├── scripts/
+│   │   └── create-admin.js      ← one-time super_admin seed script
+│   └── test/
+├── web/
+│   └── app/
+│       ├── parent/              ← guardian portal (magic-link auth, balance, history, notif prefs)
+│       └── fees/                ← fee assignment management (manager+)
+├── docs/
+│   ├── ai-feature-strategy.md
+│   ├── competitive-paymon.md
+│   ├── deployment.md            ← infrastructure runbook (DO, DNS, Resend email setup)
+│   ├── sso-strategy.md
+│   ├── student-credential-model.md
+│   └── student-pos-integration-diagrams.md
+├── .do/app.yaml                 ← DigitalOcean App Platform spec
+├── .github/workflows/
+│   ├── ci.yml                   ← syntax check + web build on all branches
+│   └── deploy.yml               ← auto-deploy to DO on main push
+└── docker-compose.yml
 ```
 
-Keep wallet, order, and payment writes inside one API/database transaction. Do not split those into separate services yet.
+---
 
-## Current Working Model
+## Current Status
 
-**Backend — all implemented:**
+### Backend
 
-- Organizations, stores, products, customers, wallets CRUD
-- Atomic wallet sale, paid cash/card sale, wallet credit-line enforcement
-- Full-order and partial-order refunds
-- Inventory management: records, adjustments, receiving workflows, location transfers
-- Cash drawer sessions: open, track cash sales, close with variance calculation
-- Student credentials: NFC/card/PIN issuance and register resolution
-- Student Educational app integration
-- Browser PIN login/session flow (cashier, manager, admin, super-admin roles)
-- Idempotency, audit events, immutable wallet ledger trigger
-- **AI module**: Daily Closeout Summary and Anomaly Alerts (`/v1/ai/*`)
-  - Uses Claude Haiku 3.5 via `@anthropic-ai/sdk`
-  - Results stored in `commerce_ai_records` — AI never writes to financial tables
-  - Requires `ANTHROPIC_API_KEY` env var
+- Express API scaffold with health/readiness endpoints, request IDs, rate limiting
+- Postgres migrations with advisory lock
+- Core commerce schema + financial schema hardening
+- Browser PIN login/session flow with cashier, manager, admin, super-admin roles
+- Organization, store, product, customer, wallet endpoints
+- Product image URL field for register/catalog display
+- Wallet top-up endpoint
+- Atomic wallet-sale endpoint
+- Paid cash/card sale endpoint
+- Wallet credit-line support with negative balances allowed only up to the configured limit
+- Inventory table, adjustment endpoint, low-stock API state, sale-driven stock decrement
+- Inventory receiving workflows, CSV import review, location transfers
+- Cash drawer sessions with open/current/list/close endpoints and cash-sale tracking
+- Order list/detail endpoints
+- Full-order refund and partial refund endpoints
+- Student Educational app integration endpoints
+- Student credential issuance, resolution, and revocation
+- Idempotency helper, audit helper, immutable wallet transaction trigger
+- API integration tests
+- **AI module** — Closeout Summary, Anomaly Alerts, Sales Forecast, Inventory Reorder, Guardian Spending Digest, Usage tracking (see AI section below)
+- **Email module** — Resend-powered transactional email; receipt emails route to linked guardians; fire-and-forget via `setImmediate`
+- **Guardian module** — guardian CRUD, guardian-student links, guardian portal with magic-link OTP auth, notification preferences (`email_on_purchase`, `low_balance_threshold_cents`)
+- **Fee assignments module** — pre-assigned charges (field trips, fees), collectible at register via wallet/cash/card
+- **Category permissions** — staff can be restricted to specific product categories; zero rows = unrestricted
+- **Platform admin guard** — only `platform_admin`, `super_admin`, `service` roles can create new organizations
+- **Organization contact email** — `contact_email` field on each org; used as `Reply-To` on receipt emails so parents reply directly to the school
 
-**Infrastructure — all in place:**
+### Infrastructure
 
-- Docker Compose dev stack (api + web + postgres)
-- Multi-stage production Dockerfiles
+- Docker-first dev workflow (api + web + postgres)
+- Multi-stage production Dockerfiles for api and web
 - DigitalOcean App Platform spec at `.do/app.yaml` (~$25/month)
 - GitHub Actions CI (`ci.yml`) — syntax check + web build on all branches
-- GitHub Actions deploy (`deploy.yml`) — auto-deploy on push to `main`
-- Deployment runbook at `docs/deployment.md`
+- GitHub Actions deploy (`deploy.yml`) — auto-deploy to DO on push to main
+- Production + email (Resend + notify.fransolution.net) runbook at `docs/deployment.md`
+- DNS records for `notify.fransolution.net` live in AWS Route 53
 
-**Frontend — live routes:**
+### Frontend
 
-- `/register` — cashier POS with product tiles, NFC, cash/card/wallet checkout, receipt print
-- `/products` — live catalog CRUD
-- `/inventory` — live inventory with receiving/adjustments
-- `/orders` — receipt detail, full + partial refunds
-- `/payments` — cash drawer open/close with variance
-- `/customers` — customer list
-- `/settings` — live org profile (name, type, currency, tax) + stores list
-- `/organizations` — platform-level org CRUD (super admin)
-- `/reports` — sales analytics + **AI Closeout Summaries** + **AI Anomaly Alerts**
-- `/student-demo` — student/parent balance and transaction history
-- `/staff` — staff list (creation UI not yet complete)
+- Route-level modular POS frontend with role-filtered navigation (numeric `ROLE_LEVEL` map)
+- Cashier register with live product tiles, category filters, stock badges, POS customer search, Student app search, NFC reader, cash/card/wallet checkout, receipt, signed student wallet balance, pending fees panel
+- Register UI split into POS-specific components under `web/app/register/`
+- Live Products admin route — products tab + categories tab (create/edit categories, assign products)
+- Live inventory route with manager stock receiving/adjustments
+- Orders route with receipt detail, line items, wallet impact, inventory impact, full and partial refunds
+- Payments route with cash drawer open/close and expected-vs-counted variance
+- Settings route — org profile (name, type, currency, tax, contact email) + stores list
+- Organizations route — platform-level org CRUD (super_admin only for creation)
+- Staff route — create/edit staff with role, store assignments, and category access restrictions
+- Fees route (`/fees`) — create fee assignments, assign to students, cancel fees (manager+)
+- Reports route — tabbed layout: "Financial Reports" (summary metrics, payment breakdown, product sales) and "AI Insights" (Anomaly Alerts, Sales Forecast, Reorder Recommendations, Closeout Summaries, Guardian Digest trigger)
+- **Guardian portal** (`/parent`) — mobile-optimized parent view with magic-link login, wallet balances, purchase history per student, notification preferences toggle
+- Student app preview route for balance and POS transaction history
+- Print CSS for 72mm receipt printing
 
-## Local Development
+Current live local URLs:
+
+```text
+API: http://localhost:4100
+Web: http://localhost:3100
+```
+
+---
+
+## Running Locally
 
 ```bash
 cp .env.example .env
+# fill in RESEND_API_KEY, ANTHROPIC_API_KEY, CLOUDINARY_* if needed
 docker compose up --build
 ```
 
-Useful ports:
+Docker Compose runs:
 
 ```text
-API:      http://localhost:4100
-Web:      http://localhost:3100
-Postgres: localhost:5434
+api: npm run dev   (node --watch)
+web: npm run dev -- -H 0.0.0.0
 ```
 
-Local API calls use a development actor fallback when `NODE_ENV !== "production"`.
+Both services use bind mounts — edits under `api/` and `web/` are reflected immediately.
 
-The Docker Compose setup is the default development workflow. The `api` and `web`
-services use bind mounts, so local code edits are reflected in running containers.
-Use `docker compose up -d api web` after the database is healthy. Do not start the
-Next dev server directly on the host unless the user explicitly asks for a non-Docker
-workflow.
+Apply migrations when needed:
 
-Production writes require:
+```bash
+docker compose exec api npm run migrate
+```
+
+Run tests:
+
+```bash
+cd api && npm test
+```
+
+Build web:
+
+```bash
+cd web && npm run build
+```
+
+Create the platform super_admin (one-time):
+
+```bash
+docker compose exec api node scripts/create-admin.js
+# uses ADMIN_EMAIL, ADMIN_NAME, ADMIN_PIN env vars
+```
+
+---
+
+## API Patterns
+
+Success: `{ "data": {} }`
+Error: `{ "error": "Message" }`
+
+Money-moving requests require: `Idempotency-Key: unique-client-key`
+
+## Endpoints
 
 ```text
-Authorization: Bearer $COMMERCE_API_TOKEN
+# Auth (staff)
+POST  /v1/auth/login
+POST  /v1/auth/logout
+GET   /v1/auth/me
+
+# Guardian portal (parent-facing, separate session cookie)
+GET   /v1/guardian-portal/org/:orgId          ← public, org info for login page
+POST  /v1/guardian-portal/auth/request        ← send OTP magic-link email
+POST  /v1/guardian-portal/auth/verify         ← verify OTP → session cookie
+POST  /v1/guardian-portal/auth/accept-invite  ← accept invite token → session cookie
+POST  /v1/guardian-portal/auth/logout
+GET   /v1/guardian-portal/me                  ← guardian + linked students + notif prefs
+PATCH /v1/guardian-portal/me/notifications    ← update emailOnPurchase, lowBalanceThreshold
+GET   /v1/guardian-portal/students/:id/transactions
+
+# Demo (local only)
+POST  /v1/demo/school
+GET   /v1/demo/school
+
+# Organizations
+GET   /v1/organizations
+POST  /v1/organizations                       ← platform_admin / super_admin only
+PATCH /v1/organizations/:id                   ← includes contact_email
+
+# Stores
+GET   /v1/stores?organizationId=...
+POST  /v1/stores
+
+# Products
+GET   /v1/products?organizationId=...&storeId=...&includeInactive=true
+POST  /v1/products
+PATCH /v1/products/:id
+
+# Product categories
+GET   /v1/product-categories?organizationId=...
+POST  /v1/product-categories
+PATCH /v1/product-categories/:id
+
+# Customers & Wallets
+GET   /v1/customers?organizationId=...
+POST  /v1/customers
+GET   /v1/wallets/:id?organizationId=...
+POST  /v1/wallets/:id/top-up
+
+# Guardians
+GET   /v1/guardians?organizationId=...
+POST  /v1/guardians
+PATCH /v1/guardians/:id
+POST  /v1/guardians/:id/invite                ← sends invite email to guardian
+GET   /v1/guardians/:id/students
+POST  /v1/guardians/:id/students              ← link student to guardian
+DELETE /v1/guardians/:id/students/:studentId
+
+# Fee assignments
+GET   /v1/fee-assignments?organizationId=...&customerId=...&status=...
+POST  /v1/fee-assignments
+PATCH /v1/fee-assignments/:id                 ← cancel
+POST  /v1/fee-assignments/:id/pay             ← collect at register (wallet/cash/card)
+
+# Orders
+POST  /v1/orders/wallet-sale
+POST  /v1/orders/paid-sale
+POST  /v1/orders/:id/refund
+POST  /v1/orders/:id/partial-refund
+GET   /v1/orders?organizationId=...
+GET   /v1/orders/:id?organizationId=...
+
+# Cash Drawers
+GET   /v1/cash-drawers?organizationId=...
+GET   /v1/cash-drawers/current?organizationId=...&storeId=...&registerName=...
+POST  /v1/cash-drawers/open
+POST  /v1/cash-drawers/:id/close              ← triggers AI closeout summary async
+
+# Inventory
+GET   /v1/inventory?organizationId=...&storeId=...
+POST  /v1/inventory/:productId/adjustments
+
+# Staff
+GET   /v1/staff?organizationId=...
+POST  /v1/staff
+PATCH /v1/staff/:id
+PUT   /v1/staff/:id/stores                    ← set store assignments
+GET   /v1/staff/:id/category-permissions
+PUT   /v1/staff/:id/category-permissions      ← set allowed categories (empty = unrestricted)
+
+# Student Credentials
+GET   /v1/student-credentials?organizationId=...
+POST  /v1/student-credentials/issue
+POST  /v1/student-credentials/resolve
+POST  /v1/student-credentials/:credentialId/revoke
+
+# Student App Integration
+GET   /v1/integrations/student-app/students/search?q=...
+POST  /v1/integrations/student-app/students
+GET   /v1/integrations/student-app/students/:externalStudentId/cafeteria
+
+# AI Features
+GET   /v1/ai/summaries?organizationId=...&storeId=...&status=...
+GET   /v1/ai/summaries/:id?organizationId=...
+POST  /v1/ai/summaries
+PATCH /v1/ai/summaries/:id
+GET   /v1/ai/alerts?organizationId=...&status=...
+GET   /v1/ai/alerts/:id?organizationId=...
+POST  /v1/ai/alerts/scan                ← accepts dateFrom/dateTo
+PATCH /v1/ai/alerts/:id
+GET   /v1/ai/forecast?organizationId=...
+POST  /v1/ai/forecast                   ← 7-day forecast from date range history
+GET   /v1/ai/reorder?organizationId=...
+POST  /v1/ai/reorder                    ← reorder suggestions from inventory + sales velocity
+POST  /v1/ai/guardian-digest            ← sends AI-written digest emails to guardians (admin+)
+GET   /v1/ai/usage                      ← token/cost breakdown, platform admin only
+
+# Reports
+GET   /v1/reports/summary?organizationId=...&dateFrom=...&dateTo=...
 ```
 
-## Tenant-First Stage Rule
+---
 
-Build and demo the system as one hosted POS serving multiple school organizations.
-Every school trial gets its own organization, one or more cafeteria/store locations,
-staff accounts, products/menus, inventory, students/customers, wallets, credentials,
-and settings.
+## Auth Model
 
-- Do not auto-create demo, seed, test, or placeholder records from normal UI routes.
-- Use `GET /v1/organizations?scope=mine` and the helpers in
-  `web/app/lib/organizationContext.ts` for normal staff/admin pages.
-- Use assigned stores for cashiers/managers where available.
-- Keep `/v1/demo/school` local-only and set `DISABLE_DEMO_SEED=true` in stage/prod.
-- Super admin can configure the organization and all stores; admins/managers/cashiers
-  must be scoped by role and store assignment.
-- Automated tests must run against a dedicated test database, never the shared stage DB.
+### Staff auth
 
-## Verification Commands
+PIN login with browser sessions (`commerce_browser_sessions`). PBKDF2 hash of PIN stored in `commerce_users`.
 
-Run these before handing off meaningful backend changes:
+Roles (numeric level for nav filtering):
 
-```bash
-cd api
-DATABASE_URL=postgres://commerce_pos:commerce_pos_dev_password@localhost:5434/commerce_pos npm run migrate
-npm test
+| Role | Level | Access |
+|---|---|---|
+| `cashier` | 1 | Register, own orders |
+| `accountant` | 1 | Read-only finance |
+| `store_manager` | 2 | + Inventory, fees, staff view |
+| `organization_admin` | 3 | + Settings, products, customers |
+| `organization_owner` | 3 | Same as admin |
+| `super_admin` | 4 | All orgs, platform config |
+| `platform_admin` | 4 | Same as super_admin |
+| `service` | 4 | Service-to-service token |
+
+Local development uses a dev actor fallback when `NODE_ENV !== "production"`. Optional headers: `x-actor-user-id`, `x-actor-service`, `x-actor-role`, `x-organization-id`.
+
+Database auth tables: `commerce_users`, `commerce_user_store_assignments`, `commerce_service_tokens`, `commerce_browser_sessions`.
+
+### Guardian (parent) auth
+
+Separate magic-link OTP flow. No PIN. Issues its own HTTP-only session cookie (`guardian_portal_session`). Middleware: `requireGuardianSession` in `guardianAuth.js`. Tables: `commerce_guardians`, `commerce_guardian_magic_links`, `commerce_guardian_sessions`.
+
+---
+
+## Email System
+
+Transactional email via **Resend** from `notify.fransolution.net` (subdomain — does not affect Google Workspace MX on root domain).
+
+Shared helpers in `api/src/shared/email/`:
+
+| File | Purpose |
+|---|---|
+| `emailClient.js` | Resend SDK wrapper; `sendEmail()`, `buildInviteEmail()`, `buildMagicLinkEmail()` |
+| `receiptEmail.js` | `sendReceiptEmail()` — routes to linked guardians with `email_on_purchase: true`; falls back to customer email if no guardians |
+
+Rules:
+- Silently skips (logs warning) if `RESEND_API_KEY` is not set — never throws.
+- Always fires via `setImmediate` after the transaction commits — never blocks a sale.
+- Guardian `notification_prefs.email_on_purchase` (JSONB, default `true`) controls opt-in/out.
+- Organization `contact_email` is set as `Reply-To` so parents reply to the school.
+
+Required env vars:
+
+```text
+RESEND_API_KEY=re_...
+EMAIL_FROM=Commerce POS <noreply@notify.fransolution.net>
 ```
 
-For frontend changes:
+---
 
-```bash
-cd web
-npm run build
+## Financial Safety Rules
+
+Follow these exactly:
+
+- Store all money in integer cents.
+- Keep currency explicit. Current supported currency is `USD`.
+- Use transactions for every money-moving flow.
+- Use `SELECT ... FOR UPDATE` when changing wallet balances.
+- Calculate totals server-side from product snapshots.
+- Insert immutable order item snapshots.
+- Insert wallet ledger rows; never mutate them later.
+- Enforce `balance_cents + credit_limit_cents >= 0` for wallet sales.
+- Write audit events inside the same transaction as financial writes.
+- Use idempotency keys and request body hashes.
+- Return replayed idempotent responses without repeating side effects.
+- Reject reused idempotency keys with changed request bodies.
+
+---
+
+## Database Notes
+
+Migrations applied in order:
+
+```text
+001_core_schema.sql
+002_harden_financial_schema.sql
+003_auth_rbac_foundation.sql
+004_wallet_credit_lines.sql
+005_customer_external_id.sql
+006_inventory_foundation.sql
+007_cash_drawer_sessions.sql
+008_product_image_url.sql
+009_super_admin_role.sql
+010_inventory_receiving_workflows.sql
+011_inventory_transfers_and_import_apply.sql
+012_student_credentials.sql
+013_browser_auth_sessions.sql
+013_currency_and_tax_settings.sql   ← same prefix as above, applied after
+014_partial_refunds.sql
+015_ai_records.sql
+016_employees_and_payroll.sql
+017_customer_home_location.sql
+018_guardians.sql                   ← commerce_guardians, guardian_students, magic_links, sessions
+019_avatar_public_ids.sql
+020_product_category_enhancements.sql
+021_category_permissions.sql        ← commerce_user_category_permissions
+022_fee_assignments.sql             ← commerce_fee_assignments
+023_organization_contact_email.sql  ← contact_email column on commerce_organizations
+024_ai_cost_tracking.sql            ← cost_microdollars BIGINT on commerce_ai_records
+025_ai_new_features.sql             ← adds guardian_digest, sales_forecast to source_type check
 ```
 
-Container verification:
+Do not edit already-applied migrations. Add a new numbered migration for schema changes.
 
-```bash
-docker compose ps
-curl -sS http://localhost:4100/health
-curl -sS -I http://localhost:3100
+---
+
+## Frontend Direction
+
+Route-level modular Next.js app. Navigation is filtered by numeric role level — only routes the current user's role can reach are rendered.
+
+```text
+/dashboard          — all staff
+/register           — cashier+
+/orders             — cashier+
+/inventory          — manager+
+/products           — admin+  (products tab + categories tab)
+/customers          — manager+
+/payments           — manager+  (cash drawer)
+/fees               — manager+  (fee assignment management)
+/reports            — manager+  (AI summaries + anomaly alerts)
+/staff              — admin+    (create/edit staff, store assignments, category access)
+/settings           — admin+    (org profile, contact email, tax, stores)
+/organizations      — super_admin only
+
+/parent             — guardian portal (separate auth, magic-link)
+/parent/login
+/parent/dashboard
+/parent/student/[id]
+
+/student-demo       — demo/preview
+/register-login     — cashier PIN login screen
 ```
 
-Repo-wide quick checks:
+Register-specific frontend files:
+
+```text
+web/app/register/RegisterClient.tsx
+web/app/register/ProductCatalog.tsx
+web/app/register/StudentSelector.tsx
+web/app/register/CartPanel.tsx       ← includes pending fees panel
+web/app/register/ReceiptPreview.tsx
+web/app/register/registerUtils.ts
+web/app/register/types.ts
+```
+
+Tenant-first rule:
+- All routes load data scoped to the signed-in staff member's organization.
+- Super admin can see/manage all organizations.
+- Stage/prod must set `DISABLE_DEMO_SEED=true`.
+
+---
+
+## Verification Expectations
+
+Before finalizing backend work:
 
 ```bash
 git diff --check
 for f in $(find api/src api/test -name '*.js' -print); do node --check "$f" || exit 1; done
+cd api && npm test
 ```
 
-## Backend Conventions
+Before finalizing frontend work:
 
-- No ORM.
-- Use raw SQL through `pg`.
-- Use UUID primary keys.
-- Use integer cents for money, never floating point money.
-- Use `{ data: ... }` for success responses.
-- Use `{ error: "message" }` for error responses.
-- Keep all money-moving work inside `withTransaction`.
-- Use `Idempotency-Key` for money-moving endpoints.
-- Wallet balances may be negative only within the wallet `credit_limit_cents`.
-- Always scope tenant-owned queries by `organization_id`.
-- Do not look up tenant data by bare UUID alone.
-- Write audit events in the same transaction as financial changes.
-- Do not mutate wallet ledger rows.
-
-## Database Rules
-
-Migrations live in:
-
-```text
-api/src/db/migrations/
+```bash
+cd web && npm run build
 ```
 
-Migrations must be safe to run once in order through `schema_migrations`.
+---
 
-Financial schema expectations:
+## Known Gaps
 
-- Composite tenant foreign keys where possible.
-- `CHECK` constraints for statuses, types, and currency.
-- Immutable wallet transaction trigger.
-- Duplicate successful payment protection.
-- Audit metadata for financial operations.
-- Advisory lock around migrations.
+**Auth / Access**
+- Store assignment enforcement is incomplete — cashier/manager endpoints don't yet reject cross-store requests.
+- No formal order void workflow or manager approval rules.
+- Dev actor fallback (`x-actor-*` headers) must be removed before first live school goes on prod — replace with a seeded test credential.
 
-## Current Docs
+**Register / POS**
+- Card checkout is recorded as a payment method only; no card provider or terminal integration yet.
+- Demo seed creates products but no stores — register shows empty catalog for Demo Academy until a store is created.
 
-Read these before architecture or money-flow changes:
+**Payments / Finance**
+- Stripe wallet top-up not yet integrated (Stripe Mexico supports MXN, OXXO, SPEI).
+- No parent-facing wallet top-up flow from the guardian portal.
 
-- `docs/architecture-security.md`
-- `docs/agent-architecture-review.md`
-- `docs/api-working-model.md`
-- `docs/frontend-working-model.md`
-- `commerce-pos-service.md`
+**Guardian / Parent platform**
+- No spending controls, allergen blocking, or product category blocking at POS.
+- No pre-ordering or meal subscriptions.
+- Low-balance alert email not yet triggered (threshold is stored, but the alert send logic is not wired).
 
-## What Not To Do
+**AI Features**
+- Anomaly detection runs on-demand only — no scheduled cron wired yet.
+- Requires `ANTHROPIC_API_KEY` in `.env`; without it endpoints return empty results gracefully.
 
-- Do not store raw card data, CVV, or payment credentials.
-- Do not use floats for money.
-- Do not add a payment/card flow without provider signature verification and idempotency.
-- Do not bypass `organization_id` scoping.
-- Do not hard-delete financial records.
-- Do not update or delete wallet ledger records.
-- Do not show detailed credit math in the cashier UI; show the selected student's signed balance and only warn when blocked.
-- Do not create unpaid-order plus pay-order flows until the full order state machine is designed.
-- Do not split into microservices or add queues/Redis/Kubernetes until there is real need.
-- Do not put SQL directly into large route handlers for money flows.
-- **Do not let AI write to financial tables.** AI outputs go to `commerce_ai_records` only. The pattern is: SQL aggregation → facts object → AI summary → human review → existing API if action needed.
-- Do not call the LLM from inside a financial transaction. Enqueue async after the transaction commits.
-- Do not ask the LLM to calculate financial totals from raw rows. Always pass pre-computed cents values.
+**Full-school payments**
+- No event ticketing, marketplace module, or transport/fee billing beyond the basic fee assignments module.
+
+---
+
+## AI Features
+
+The AI system is live. Read `docs/ai-feature-strategy.md` for product strategy and `docs/api-reference.md` for full endpoint reference.
+
+**Model:** `claude-haiku-4-5` (replaces retired `claude-haiku-3-5-20241022`). Cost ~$0.001 per call.
+**Cost tracking:** `cost_microdollars` stored on every `commerce_ai_records` row. Visible only to platform admins via `GET /v1/ai/usage`.
+
+- **Daily Closeout Summary** — fires automatically (fire-and-forget via `setImmediate`) when `POST /v1/cash-drawers/:id/close` commits. Aggregates 6 SQL queries, hashes the facts, calls AI, stores in `commerce_ai_records`.
+- **Anomaly Alerts** — on-demand scan via `POST /v1/ai/alerts/scan`. Accepts `dateFrom`/`dateTo`. Runs 4 SQL rules; LLM only called when a rule fires. Returns "not enough data" message to UI when rules produce no hits.
+- **Sales Forecast** — on-demand via `POST /v1/ai/forecast`. Analyzes daily sales history for the selected date range; projects next 7 days with trend, confidence, and key insights.
+- **Inventory Reorder Assistant** — on-demand via `POST /v1/ai/reorder`. Finds products below reorder threshold or with <7 days of stock based on 30-day sales velocity; returns prioritized reorder list with suggested quantities.
+- **Guardian Spending Digest** — admin-triggered via `POST /v1/ai/guardian-digest`. Generates and emails a personalized weekly spending summary to each guardian with notifications enabled. Uses Resend.
+- **Reports UI** — `/reports` shows all five AI sections: Anomaly Alerts, Forecast, Reorder, Guardian Digest trigger, and Closeout Summaries.
+
+Architecture rules:
+- AI outputs live only in `commerce_ai_records`. AI never writes to financial tables.
+- Aggregation is always deterministic SQL first. AI summarizes pre-computed facts.
+- Every AI record is scoped by `organization_id`. Never query across tenants.
+- Status lifecycle: `pending → draft → reviewed` or `dismissed`.
+
+---
 
 ## Competitive Context
 
-The primary competitor in the Latin American private school market is **Paymon** (paymon.io).
-Read `docs/competitive-paymon.md` before designing new features — it contains confirmed
-pricing, feature inventory, and gap analysis from a real sales proposal (March 2026).
+Primary competitor in the Latin American private school market is **Paymon** (paymon.io).
+Full intelligence report at `docs/competitive-paymon.md`.
 
-**Pricing reference:** Paymon charges ~$6,700 MXN/month per school on a full school-year
-contract + 2.9% on card/transfer payments (passable to parents) + $2,800 MXN for a
-proprietary Android POS terminal. They are pre-breakeven at 110 schools.
+Key data: Paymon charges ~$6,700 MXN/month (~$370 USD) per school on annual contracts + 2.9% transaction fee. Hardware (Android POS terminal) is $2,800 MXN one-time.
 
-**Their moats to match:** parental controls (allergen blocking, product blocking, spending
-limits, pre-ordering, notifications), hardware diversity (NFC + QR + fingerprint).
+Paymon moats: parental control depth (allergen blocking, category blocking, day-of-week limits, pre-ordering, real-time notifications) and hardware diversity (QR + NFC wristband + NFC card + fingerprint).
+Paymon gaps: no US market, no SIS integrations, cashless-only, annual contracts only, no partial refunds, no multi-school group management.
 
-**Their gaps to exploit:** no US market, cashless-only, annual lock-in, no SIS
-integrations, no partial refunds, no multi-school group management, 2.9% passed to parents.
+Our positioning: transparent flat-rate or school-absorbs-fee model, month-to-month pilot commitments, cash + card + wallet mixed payments, guardian notification prefs already live.
 
-## Near-Term Direction
+---
 
-### Operator foundation (do first)
+## Build Priority
 
-1. Add staff creation/management UI — name, PIN, role, store assignment.
-2. Enforce store assignment scoping for cashiers and managers at every endpoint.
-3. Add formal order void workflow and manager approval rules.
-4. Harden Student Educational app service-token integration.
-5. ~~Add production deployment docs and backup/restore runbook.~~ **Done** — `docs/deployment.md`, `.do/app.yaml`, GitHub Actions.
-6. Fix demo seed to create stores so the Demo Academy register works out of the box.
+**Immediate (operator hardening):**
+1. ~~Staff creation/management UI~~ **Done**
+2. Enforce store assignments for cashier/store-manager at every endpoint
+3. Add formal void workflow and manager approval rules
+4. Remove dev actor fallback (`x-actor-*` headers) before first live school
+5. ~~Production deployment runbook~~ **Done** — `docs/deployment.md`
 
-### Parental platform (next major product surface)
+**Guardian platform (compete with Paymon):**
+6. Parent wallet top-up from guardian portal (Stripe MXN / OXXO / SPEI)
+7. Low-balance alert email (threshold already stored in `notification_prefs`)
+8. Per-day spending limits and product/category blocking at POS
+9. Allergen registration per student + block at POS sale time
+10. Pre-ordering: parent reserves a meal for a future date
 
-These features are Paymon's deepest competitive moat. Build them as a dedicated
-`parents` module with its own auth layer (parents are not staff — separate credential
-and session model).
+**Full-school payments:**
+11. Event ticketing and fee collection beyond basic fee assignments
+12. Marketplace module for uniforms, books, supplies
+13. Transport/extracurricular fee billing
 
-6. **Parent wallet top-up** — parent-facing endpoint to add funds via card or bank
-   transfer. Idempotent, audited, emits wallet ledger row. Fee model is organization-
-   configured: school absorbs, or explicit disclosed fee — never silently passed through.
-7. **Purchase notifications** — email or webhook fired inside the same transaction as a
-   wallet sale. Parent receives: student name, item(s) bought, amount charged, balance after.
-8. **Spending controls** — `commerce_wallet_spending_rules` table: per-wallet rules for
-   daily max spend, per-day-of-week max, blocked product IDs, blocked category names.
-   POS enforces rules at sale time before charging wallet — same transaction, same
-   FOR UPDATE lock on wallet row.
-9. **Allergen registration** — `commerce_customer_allergens` table linking customer to
-   allergen codes. Products tagged with matching allergen codes are blocked at wallet
-   sale time; cashier sees a clear warning. Does not block cash/card sales (parent
-   consent model — wallet is the controlled payment method).
-10. **Parent purchase history** — read endpoint scoped to a parent credential, returning
-    wallet transactions with item snapshots. No new data — already in
-    `commerce_wallet_transactions` + `commerce_order_items`.
-11. **Pre-ordering** — `commerce_pre_orders` table: customer, store, date, items,
-    status (pending → fulfilled → cancelled). Cashier marks pickup at register.
-    Pre-orders decrement inventory at fulfilment, not at creation.
-12. **Meal subscriptions** — recurring wallet top-up schedule: amount, frequency
-    (weekly/monthly), active flag. Background job or cron fires top-up and emails parent.
+**Compliance and nutrition:**
+14. Operator-side allergen tagging on products
+15. Dietary restriction enforcement at POS
 
-### Full-school payments (expansion wedge — same strategy Paymon is executing)
+**Positioning vs. Paymon:**
+16. Fee model configuration: org chooses to absorb or disclose processing cost
+17. Multi-school group dashboard for school chains
+18. Hardware agnosticism docs: NFC, QR, fingerprint, username — no proprietary terminal required
 
-13. Event ticketing and fee collection.
-14. Marketplace module (uniforms, books, supplies).
-15. Transport and extracurricular fee billing.
-
-### Compliance features
-
-16. **Operator allergen tagging** — `allergens` array on `commerce_products`. Linked to
-    parental allergen blocks in #9. Visible in register tile tooltip.
-17. **Dietary restriction enforcement** — warn or block at POS when student has a
-    restriction that matches a cart item. Manager-override PIN to bypass.
-
-### Positioning features (directly against Paymon)
-
-18. **Fee transparency config** — `fee_model` on organization: `school_absorbs` or
-    `disclosed_to_parent`. When `disclosed_to_parent`, top-up endpoint returns the fee
-    amount explicitly and requires client acknowledgement before charging.
-19. **Multi-school group dashboard** — super admin view aggregating revenue, active
-    students, and drawer status across all organizations. School chains need this.
-20. **Hardware integration docs** — document NFC wristband, NFC card, QR code, fingerprint,
-    and username/PIN as supported student identification methods. None require proprietary
-    terminals; all use the existing `student-credentials` resolution endpoint.
-
-## Module Pattern
-
-Backend modules should follow this shape:
-
-```text
-routes.js        HTTP parsing and response shape only
-schemas.js       zod validation when the module grows
-service.js       business rules and transaction orchestration
-repo.js          SQL only, always tenant-scoped
-events.js        audit/webhook event creation when needed
-```
-
-Current modules:
-
-```text
-ai               ← closeout summaries + anomaly alerts
-auth
-cashDrawers
-customers
-demo
-integrations/student-app
-inventory
-orders
-organizations
-products
-reports
-staff
-stores
-studentCredentials
-wallets
-```
-
-Shared utilities:
-
-```text
-shared/ai/       ← Anthropic SDK client, prompt builders, input hash helper
-shared/audit/
-shared/auth/
-shared/http/
-shared/idempotency/
-```
-
-Expected next modules:
-
-```text
-parents          ← parental controls, top-ups, notifications, pre-orders
-subscriptions    ← recurring wallet top-up plans
-events           ← ticketing, fees, marketplace
-```
+Keep the system simple, transaction-safe, and cheap to deploy until real scale requires more infrastructure.

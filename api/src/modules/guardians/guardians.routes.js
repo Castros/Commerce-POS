@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
+import { parse } from "csv-parse/sync";
+import multer from "multer";
 
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
@@ -322,5 +324,168 @@ guardiansRouter.delete(
       [guardianId, studentId, organizationId]
     );
     res.json({ data: { ok: true } });
+  })
+);
+
+// ── CSV Import ────────────────────────────────────────────────────────────────
+
+const guardianUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    const ok =
+      file.mimetype === "text/csv" ||
+      file.mimetype === "application/vnd.ms-excel" ||
+      file.originalname.toLowerCase().endsWith(".csv");
+    if (!ok) return cb(new Error("Only .csv files are accepted"));
+    cb(null, true);
+  },
+});
+
+const GUARDIAN_CSV_ROW_SCHEMA = z.object({
+  name:  z.string().min(1, "name is required"),
+  email: z.string().email("email must be a valid email address"),
+  phone: z.string().optional(),
+});
+
+function parseGuardianCsvRows(buffer) {
+  const text = buffer.toString("utf8").replace(/^﻿/, ""); // strip BOM
+  return parse(text, {
+    columns: true,
+    skip_empty_lines: true,
+    trim: true,
+  });
+}
+
+// POST /v1/guardians/import/preview
+guardiansRouter.post(
+  "/import/preview",
+  requirePermission("customers:write"),
+  guardianUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    let rawRows;
+    try {
+      rawRows = parseGuardianCsvRows(req.file.buffer);
+    } catch {
+      throw badRequest("Could not parse CSV — check the file format");
+    }
+
+    if (rawRows.length === 0) throw badRequest("CSV has no data rows");
+    if (rawRows.length > 500) throw badRequest("Max 500 rows per import");
+
+    // Load existing guardian emails for this org
+    const existing = await pool.query(
+      `SELECT email FROM commerce_guardians WHERE organization_id = $1`,
+      [organizationId]
+    );
+    const existingEmails = new Set(existing.rows.map((r) => r.email.toLowerCase()));
+
+    const preview = [];
+    const errors = [];
+
+    for (let i = 0; i < rawRows.length; i++) {
+      const rowNum = i + 2;
+      const parsed = GUARDIAN_CSV_ROW_SCHEMA.safeParse(rawRows[i]);
+
+      if (!parsed.success) {
+        errors.push({ row: rowNum, error: parsed.error.issues[0]?.message ?? "Invalid row" });
+        continue;
+      }
+
+      const r = parsed.data;
+      const normalizedEmail = r.email.toLowerCase().trim();
+      const action = existingEmails.has(normalizedEmail) ? "update" : "create";
+
+      preview.push({
+        row: rowNum,
+        name: r.name.trim(),
+        email: normalizedEmail,
+        phone: r.phone?.trim() || null,
+        action,
+      });
+    }
+
+    res.json({
+      data: {
+        total: rawRows.length,
+        valid: preview.length,
+        errors,
+        preview,
+      },
+    });
+  })
+);
+
+// POST /v1/guardians/import/apply
+guardiansRouter.post(
+  "/import/apply",
+  requirePermission("customers:write"),
+  guardianUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    let rawRows;
+    try {
+      rawRows = parseGuardianCsvRows(req.file.buffer);
+    } catch {
+      throw badRequest("Could not parse CSV");
+    }
+
+    if (rawRows.length === 0) throw badRequest("CSV has no data rows");
+    if (rawRows.length > 500) throw badRequest("Max 500 rows per import");
+
+    const results = { created: 0, updated: 0, errors: [] };
+
+    await withTransaction(async (client) => {
+      // Load existing emails inside the transaction
+      const existing = await client.query(
+        `SELECT email FROM commerce_guardians WHERE organization_id = $1`,
+        [organizationId]
+      );
+      const existingEmails = new Set(existing.rows.map((r) => r.email.toLowerCase()));
+
+      for (let i = 0; i < rawRows.length; i++) {
+        const rowNum = i + 2;
+        const parsed = GUARDIAN_CSV_ROW_SCHEMA.safeParse(rawRows[i]);
+
+        if (!parsed.success) {
+          results.errors.push({ row: rowNum, error: parsed.error.issues[0]?.message ?? "Invalid row" });
+          continue;
+        }
+
+        const r = parsed.data;
+        const normalizedEmail = r.email.toLowerCase().trim();
+        const isUpdate = existingEmails.has(normalizedEmail);
+
+        try {
+          await client.query(
+            `INSERT INTO commerce_guardians
+               (organization_id, name, email, phone, active)
+             VALUES ($1, $2, $3, $4, TRUE)
+             ON CONFLICT (organization_id, email) DO UPDATE
+               SET name       = EXCLUDED.name,
+                   phone      = COALESCE(EXCLUDED.phone, commerce_guardians.phone),
+                   updated_at = NOW()`,
+            [organizationId, r.name.trim(), normalizedEmail, r.phone?.trim() || null]
+          );
+          if (isUpdate) {
+            results.updated++;
+          } else {
+            results.created++;
+            existingEmails.add(normalizedEmail);
+          }
+        } catch (err) {
+          results.errors.push({ row: rowNum, name: r.name, error: err.message });
+        }
+      }
+    });
+
+    res.json({ data: results });
   })
 );

@@ -1,10 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
+import multer from "multer";
+import { parse as parseCsv } from "csv-parse/sync";
 
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
 import { authorizeTenant, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, notFound, parseZod } from "../../shared/http/errors.js";
+
+const csvUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 export const customersRouter = Router();
 
@@ -248,5 +252,101 @@ customersRouter.post(
     });
 
     res.json({ data: { imported, errors } });
+  })
+);
+
+// ── CSV import (preview + apply, multipart) ───────────────────────────────────
+
+const csvRowSchema = z.object({
+  name:        z.string().min(1),
+  email:       z.string().email().optional().or(z.literal("")),
+  phone:       z.string().optional(),
+  external_id: z.string().optional(),
+});
+
+function parseCsvRows(buffer) {
+  return parseCsv(buffer.toString("utf8"), { columns: true, skip_empty_lines: true, trim: true });
+}
+
+customersRouter.post(
+  "/import/preview",
+  requirePermission("customers:write"),
+  csvUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    const rows = parseCsvRows(req.file.buffer);
+    if (rows.length > 1000) throw badRequest("Maximum 1000 rows per import");
+
+    const preview = [];
+    const errors = [];
+
+    // Bulk-fetch existing emails for this org
+    const emails = rows.map((r) => (r.email || "").toLowerCase()).filter(Boolean);
+    const existing = emails.length
+      ? (await pool.query(
+          `SELECT LOWER(email) AS email FROM commerce_customers WHERE organization_id = $1 AND email = ANY($2)`,
+          [organizationId, emails]
+        )).rows.map((r) => r.email)
+      : [];
+    const existingSet = new Set(existing);
+
+    for (let i = 0; i < rows.length; i++) {
+      const parsed = csvRowSchema.safeParse(rows[i]);
+      if (!parsed.success) {
+        errors.push({ row: i + 2, error: parsed.error.issues[0]?.message ?? "Invalid row" });
+        continue;
+      }
+      const r = parsed.data;
+      const emailLower = (r.email || "").toLowerCase();
+      const action = emailLower && existingSet.has(emailLower) ? "update" : "create";
+      preview.push({ row: i + 2, name: r.name, email: r.email || null, phone: r.phone || null, externalId: r.external_id || null, action });
+    }
+
+    res.json({ data: { total: rows.length, valid: preview.length, errors, preview } });
+  })
+);
+
+customersRouter.post(
+  "/import/apply",
+  requirePermission("customers:write"),
+  csvUpload.single("file"),
+  asyncHandler(async (req, res) => {
+    if (!req.file) throw badRequest("No file uploaded");
+    const organizationId = z.string().uuid().parse(req.body.organizationId);
+    authorizeTenant(req.actor, organizationId);
+
+    const rows = parseCsvRows(req.file.buffer);
+    if (rows.length > 1000) throw badRequest("Maximum 1000 rows per import");
+
+    let created = 0, updated = 0;
+    const errors = [];
+
+    await withTransaction(async (client) => {
+      for (let i = 0; i < rows.length; i++) {
+        const parsed = csvRowSchema.safeParse(rows[i]);
+        if (!parsed.success) { errors.push({ row: i + 2, error: parsed.error.issues[0]?.message ?? "Invalid row" }); continue; }
+        const r = parsed.data;
+        try {
+          const result = await client.query(
+            `INSERT INTO commerce_customers (organization_id, name, email, phone, external_id, customer_type)
+             VALUES ($1, $2, $3, $4, $5, 'student')
+             ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
+             DO UPDATE SET name  = EXCLUDED.name,
+                           email = COALESCE(EXCLUDED.email, commerce_customers.email),
+                           phone = COALESCE(EXCLUDED.phone, commerce_customers.phone)
+             RETURNING (xmax = 0) AS inserted`,
+            [organizationId, r.name, r.email || null, r.phone || null, r.external_id || null]
+          );
+          if (result.rows[0]?.inserted) created++; else updated++;
+        } catch (err) {
+          errors.push({ row: i + 2, name: r.name, error: err.message });
+        }
+      }
+    });
+
+    res.json({ data: { created, updated, errors } });
   })
 );

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import AvatarUpload from "../components/AvatarUpload";
 import { apiGet, apiPost, apiPatch } from "../lib/api";
 import { loadCurrentOrganization } from "../lib/organizationContext";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
 type Student = { studentId: string; name: string; relationship: string; isPrimary: boolean };
 
@@ -35,7 +36,25 @@ function blankCreate() {
   return { name: "", email: "", phone: "", familyCode: "", sendInvite: true };
 }
 
+type GuardianCsvPreviewRow = {
+  row: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  status: "create" | "update";
+};
+
+type GuardianCsvPreview = {
+  total: number;
+  valid: number;
+  errors: { row: number; error: string }[];
+  preview: GuardianCsvPreviewRow[];
+};
+
+type GuardianCsvResult = { created: number; updated: number; skipped: number; errors: { row: number; error: string }[] };
+
 export default function GuardiansClient() {
+  const { t } = useLanguage();
   const [orgId, setOrgId] = useState<string | null>(null);
   const [guardians, setGuardians] = useState<Guardian[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
@@ -62,7 +81,86 @@ export default function GuardiansClient() {
   const [editFamilyCode, setEditFamilyCode] = useState("");
   const [editDirty, setEditDirty] = useState(false);
 
+  // CSV import state
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreviewing, setImportPreviewing] = useState(false);
+  const [importPreview, setImportPreview] = useState<GuardianCsvPreview | null>(null);
+  const [importApplying, setImportApplying] = useState(false);
+  const [importResult, setImportResult] = useState<GuardianCsvResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   useEffect(() => { void loadAll(); }, []);
+
+  function downloadImportTemplate() {
+    const csv = `name,email,phone\nMaria García,maria@example.com,555-1234\n`;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "guardians-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(file: File) {
+    if (!orgId) return;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("organizationId", orgId);
+      const res = await fetch("/api/v1/guardians/import/preview", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: GuardianCsvPreview; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Preview failed");
+      setImportPreview(json.data!);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setImportPreviewing(false);
+    }
+  }
+
+  async function applyGuardianImport() {
+    if (!orgId || !importFile) return;
+    setImportApplying(true);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("organizationId", orgId);
+      const res = await fetch("/api/v1/guardians/import/apply", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: GuardianCsvResult; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Import failed");
+      setImportResult(json.data!);
+      void loadAll();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportApplying(false);
+    }
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -232,6 +330,9 @@ export default function GuardiansClient() {
       <PageHeader eyebrow="Manager" title="Parents & Guardians">
         <button type="button" onClick={loadAll} disabled={loading}>
           {loading ? "Loading…" : "Refresh"}
+        </button>
+        <button type="button" onClick={() => setShowImport(true)}>
+          {t("common.importCsv")}
         </button>
         <button
           type="button"
@@ -407,6 +508,151 @@ export default function GuardiansClient() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CSV Import overlay ── */}
+      {showImport && (
+        <div className="importOverlay">
+          <div className="importPanel">
+            <div className="importPanelHeader">
+              <strong>{t("guardians.import.title")}</strong>
+              <button type="button" className="importPanelClose" onClick={closeImport}>✕</button>
+            </div>
+
+            {!importResult ? (
+              <>
+                <div className="importInstructions">
+                  <p>
+                    {t("guardians.import.instructions")} <code>name</code>, <code>email</code>.{" "}
+                    {t("guardians.import.optionalColumns")} <code>phone</code>.
+                  </p>
+                  <button type="button" className="importTemplateBtn" onClick={downloadImportTemplate}>
+                    <span className="material-symbols-outlined">download</span>
+                    {t("common.downloadTemplate")}
+                  </button>
+                </div>
+
+                <div
+                  className="importDropZone"
+                  onClick={() => importFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files[0];
+                    if (file) void handleImportFile(file);
+                  }}
+                >
+                  <span className="material-symbols-outlined">upload_file</span>
+                  {importFile ? (
+                    <span>{importFile.name}</span>
+                  ) : (
+                    <span>{t("guardians.import.dropZone")}</span>
+                  )}
+                </div>
+
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportFile(file);
+                    e.target.value = "";
+                  }}
+                />
+
+                {importPreviewing && <p className="importHint">{t("guardians.import.parsing")}</p>}
+                {importError && <p className="demoError">{importError}</p>}
+
+                {importPreview && (
+                  <>
+                    <div className="importSummaryBar">
+                      <span className="importSummaryItem importSummaryItem--ok">
+                        {importPreview.preview.filter((r) => r.status === "create").length} {t("guardians.import.toCreate")}
+                      </span>
+                      {importPreview.preview.filter((r) => r.status === "update").length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--skip">
+                          {importPreview.preview.filter((r) => r.status === "update").length} {t("guardians.import.toUpdate")}
+                        </span>
+                      )}
+                      {importPreview.errors.length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--err">
+                          {importPreview.errors.length} {t("guardians.import.errorsFound")}
+                        </span>
+                      )}
+                    </div>
+
+                    {importPreview.errors.length > 0 && (
+                      <div className="importErrorList">
+                        {importPreview.errors.map((e) => (
+                          <p key={e.row} className="importErrorRow">Row {e.row}: {e.error}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="importTableWrap">
+                      <table className="importTable">
+                        <thead>
+                          <tr>
+                            <th>{t("guardians.import.colName")}</th>
+                            <th>{t("guardians.import.colEmail")}</th>
+                            <th>{t("guardians.import.colPhone")}</th>
+                            <th>{t("guardians.import.colStatus")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.preview.map((row) => (
+                            <tr key={row.row} className={row.status === "update" ? "importRowSkip" : ""}>
+                              <td>{row.name}</td>
+                              <td>{row.email ?? "—"}</td>
+                              <td>{row.phone ?? "—"}</td>
+                              <td>
+                                <span className={`importStatusBadge importStatusBadge--${row.status}`}>
+                                  {row.status === "update" ? t("guardians.import.updateLabel") : t("guardians.import.createLabel")}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="importActions">
+                      <button
+                        type="button"
+                        className="btnPrimary"
+                        onClick={() => void applyGuardianImport()}
+                        disabled={importApplying || importPreview.valid === 0}
+                      >
+                        {importApplying
+                          ? t("guardians.import.importing")
+                          : `${t("guardians.import.confirmBtn")} ${importPreview.valid} ${t("guardians.import.guardiansLabel")}`}
+                      </button>
+                      <button type="button" onClick={closeImport}>{t("common.cancel")}</button>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="importResultPanel">
+                <span className="material-symbols-outlined importResultIcon">check_circle</span>
+                <h3>{t("guardians.import.doneTitle")}</h3>
+                {importResult.created > 0 && <p><strong>{importResult.created}</strong> {t("guardians.import.created")}</p>}
+                {importResult.updated > 0 && <p><strong>{importResult.updated}</strong> {t("guardians.import.updated")}</p>}
+                {importResult.skipped > 0 && <p>{importResult.skipped} {t("guardians.import.skipped")}</p>}
+                {importResult.errors.length > 0 && (
+                  <div className="importErrorList">
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="importErrorRow">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="btnPrimary" onClick={closeImport}>{t("common.done")}</button>
+              </div>
+            )}
           </div>
         </div>
       )}

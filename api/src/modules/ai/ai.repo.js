@@ -135,7 +135,7 @@ export async function buildCloseoutInputSnapshot(organizationId, sessionId) {
 
 // ── Anomaly detection queries ─────────────────────────────────────────────────
 
-export async function runAnomalyRules(organizationId) {
+export async function runAnomalyRules(organizationId, dateFrom, dateTo) {
   const flagged = [];
 
   // Anomaly 1: cashiers with refund rate significantly above org average
@@ -149,7 +149,7 @@ export async function runAnomalyRules(organizationId) {
          ON p.organization_id = o.organization_id AND p.order_id = o.id
          AND p.status = 'refunded'
        WHERE o.organization_id = $1
-         AND o.created_at >= NOW() - INTERVAL '7 days'
+         AND o.created_at >= $2 AND o.created_at < $3
          AND o.status IN ('refunded', 'partially_refunded')
        GROUP BY o.created_by_user_id
      ),
@@ -168,12 +168,12 @@ export async function runAnomalyRules(organizationId) {
      WHERE s.stddev_count > 0
        AND rc.refund_count > GREATEST(s.avg_count + 2 * s.stddev_count, 2)
      ORDER BY rc.refund_count DESC`,
-    [organizationId]
+    [organizationId, dateFrom, dateTo]
   );
   for (const row of refundResult.rows) {
     flagged.push({
       type: "high_refund_rate_by_cashier",
-      details: "A cashier processed significantly more refunds than the organization average in the last 7 days.",
+      details: "A cashier processed significantly more refunds than the organization average in the selected period.",
       observedValue: `${row.refund_count} refunds`,
       baselineValue: `Organization average: ${Number(row.avg_count).toFixed(1)} refunds`
     });
@@ -185,11 +185,11 @@ export async function runAnomalyRules(organizationId) {
      FROM commerce_cash_drawer_sessions
      WHERE organization_id = $1
        AND status = 'closed'
-       AND closed_at >= NOW() - INTERVAL '7 days'
+       AND closed_at >= $2 AND closed_at < $3
        AND ABS(over_short_cents) > 1000
      ORDER BY ABS(over_short_cents) DESC
      LIMIT 5`,
-    [organizationId]
+    [organizationId, dateFrom, dateTo]
   );
   for (const row of varianceResult.rows) {
     const sign = row.over_short_cents < 0 ? "short" : "over";
@@ -201,7 +201,7 @@ export async function runAnomalyRules(organizationId) {
     });
   }
 
-  // Anomaly 3: wallet top-ups significantly above org average
+  // Anomaly 3: wallet top-ups significantly above org average (baseline uses full history)
   const topupResult = await pool.query(
     `WITH topup_stats AS (
        SELECT AVG(amount_cents) AS avg_topup,
@@ -209,7 +209,6 @@ export async function runAnomalyRules(organizationId) {
        FROM commerce_wallet_transactions
        WHERE organization_id = $1
          AND type = 'top_up'
-         AND created_at >= NOW() - INTERVAL '90 days'
      )
      SELECT wt.amount_cents,
             wt.created_at,
@@ -219,19 +218,19 @@ export async function runAnomalyRules(organizationId) {
      CROSS JOIN topup_stats ts
      WHERE wt.organization_id = $1
        AND wt.type = 'top_up'
-       AND wt.created_at >= NOW() - INTERVAL '7 days'
+       AND wt.created_at >= $2 AND wt.created_at < $3
        AND ts.stddev_topup > 0
        AND (wt.amount_cents - ts.avg_topup) > 2 * ts.stddev_topup
      ORDER BY wt.created_at DESC
      LIMIT 5`,
-    [organizationId]
+    [organizationId, dateFrom, dateTo]
   );
   if (topupResult.rowCount > 0) {
     flagged.push({
       type: "wallet_topup_outlier",
-      details: `${topupResult.rowCount} wallet top-up(s) in the last 7 days were significantly above the organization's typical top-up amount.`,
+      details: `${topupResult.rowCount} wallet top-up(s) in the selected period were significantly above the organization's typical top-up amount.`,
       observedValue: `${topupResult.rowCount} outlier top-up(s)`,
-      baselineValue: `90-day average: $${(Number(topupResult.rows[0].avg_topup) / 100).toFixed(2)}`
+      baselineValue: `Historical average: $${(Number(topupResult.rows[0].avg_topup) / 100).toFixed(2)}`
     });
   }
 
@@ -244,19 +243,19 @@ export async function runAnomalyRules(organizationId) {
      JOIN commerce_products p
        ON p.organization_id = m.organization_id AND p.id = m.product_id
      WHERE m.organization_id = $1
-       AND m.created_at >= NOW() - INTERVAL '7 days'
+       AND m.created_at >= $2 AND m.created_at < $3
        AND m.type = 'adjustment'
        AND m.order_id IS NULL
        AND m.quantity_delta < 0
      GROUP BY m.product_id, p.name
      HAVING SUM(m.quantity_delta) < -10
      ORDER BY SUM(m.quantity_delta) ASC`,
-    [organizationId]
+    [organizationId, dateFrom, dateTo]
   );
   for (const row of shrinkageResult.rows) {
     flagged.push({
       type: "inventory_shrinkage",
-      details: `Product "${row.name}" had manual inventory reductions not tied to any sale in the last 7 days.`,
+      details: `Product "${row.name}" had manual inventory reductions not tied to any sale in the selected period.`,
       observedValue: `${Math.abs(Number(row.net_delta))} units removed (${row.adjustment_count} adjustment(s))`,
       baselineValue: "Not tied to any order"
     });
@@ -317,16 +316,17 @@ export async function updateInputSnapshot(organizationId, recordId, inputSnapsho
   );
 }
 
-export async function markDraft(organizationId, recordId, { outputJson, promptTokens, completionTokens }) {
+export async function markDraft(organizationId, recordId, { outputJson, promptTokens, completionTokens, costMicrodollars }) {
   await pool.query(
     `UPDATE commerce_ai_records
      SET status = 'draft',
          output_json = $3,
          prompt_tokens = $4,
          completion_tokens = $5,
+         cost_microdollars = $6,
          updated_at = NOW()
      WHERE organization_id = $1 AND id = $2`,
-    [organizationId, recordId, JSON.stringify(outputJson), promptTokens, completionTokens]
+    [organizationId, recordId, JSON.stringify(outputJson), promptTokens, completionTokens, costMicrodollars ?? null]
   );
 }
 
@@ -358,8 +358,6 @@ export async function findById(organizationId, recordId) {
             input_hash AS "inputHash",
             input_snapshot AS "inputSnapshot",
             output_json AS "outputJson",
-            prompt_tokens AS "promptTokens",
-            completion_tokens AS "completionTokens",
             status,
             error_message AS "errorMessage",
             reviewed_by_user_id AS "reviewedByUserId",
@@ -398,8 +396,6 @@ export async function listRecords({ organizationId, storeId, sourceType, status,
             model_name AS "modelName",
             status,
             output_json AS "outputJson",
-            prompt_tokens AS "promptTokens",
-            completion_tokens AS "completionTokens",
             error_message AS "errorMessage",
             reviewed_by_user_id AS "reviewedByUserId",
             reviewed_at AS "reviewedAt",
@@ -441,4 +437,250 @@ export async function markDismissed(organizationId, recordId, reviewedByUserId) 
     [organizationId, recordId, reviewedByUserId]
   );
   return result.rows[0] || null;
+}
+
+// ── Usage summary ─────────────────────────────────────────────────────────────
+
+export async function getUsageSummary({ organizationId, dateFrom, dateTo }) {
+  const conditions = ["status = 'draft'"];
+  const params = [];
+
+  if (organizationId) {
+    params.push(organizationId);
+    conditions.push(`r.organization_id = $${params.length}`);
+  }
+  if (dateFrom) {
+    params.push(dateFrom);
+    conditions.push(`r.created_at >= $${params.length}`);
+  }
+  if (dateTo) {
+    params.push(dateTo);
+    conditions.push(`r.created_at < $${params.length}`);
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const result = await pool.query(
+    `SELECT
+       r.organization_id                              AS "organizationId",
+       o.name                                         AS "organizationName",
+       r.model_name                                   AS "modelName",
+       r.source_type                                  AS "sourceType",
+       COUNT(*)                                       AS "callCount",
+       SUM(r.prompt_tokens)                           AS "promptTokens",
+       SUM(r.completion_tokens)                       AS "completionTokens",
+       SUM(r.cost_microdollars)                       AS "costMicrodollars",
+       MIN(r.created_at)                              AS "firstCallAt",
+       MAX(r.created_at)                              AS "lastCallAt"
+     FROM commerce_ai_records r
+     JOIN commerce_organizations o ON o.id = r.organization_id
+     ${where}
+     GROUP BY r.organization_id, o.name, r.model_name, r.source_type
+     ORDER BY SUM(r.cost_microdollars) DESC NULLS LAST`,
+    params
+  );
+
+  return result.rows;
+}
+
+// ── Reorder snapshot ──────────────────────────────────────────────────────────
+
+export async function buildReorderInputSnapshot(organizationId, storeId) {
+  const orgRow = await pool.query(
+    `SELECT name FROM commerce_organizations WHERE id = $1`,
+    [organizationId]
+  );
+
+  const params = [organizationId];
+  const storeClause = storeId ? `AND ii.store_id = $${params.push(storeId)}` : "";
+
+  const result = await pool.query(
+    `WITH velocity AS (
+       SELECT
+         ii.organization_id,
+         ii.store_id,
+         ii.product_id,
+         ii.quantity_on_hand,
+         ii.reorder_threshold,
+         COALESCE(
+           ABS(SUM(im.quantity_delta) FILTER (
+             WHERE im.type = 'sale' AND im.created_at >= NOW() - INTERVAL '30 days'
+           )), 0
+         ) AS units_sold_30d
+       FROM commerce_inventory_items ii
+       LEFT JOIN commerce_inventory_movements im
+         ON im.product_id = ii.product_id
+         AND im.organization_id = ii.organization_id
+         AND im.store_id = ii.store_id
+       WHERE ii.organization_id = $1
+         AND ii.track_inventory = true
+         ${storeClause}
+       GROUP BY ii.organization_id, ii.store_id, ii.product_id,
+                ii.quantity_on_hand, ii.reorder_threshold
+     )
+     SELECT
+       v.product_id                              AS "productId",
+       p.name                                    AS "productName",
+       s.name                                    AS "storeName",
+       v.quantity_on_hand                        AS "quantityOnHand",
+       v.reorder_threshold                       AS "reorderThreshold",
+       v.units_sold_30d                          AS "unitsSold30d",
+       ROUND(v.units_sold_30d / 30.0, 2)         AS "avgDailySales",
+       CASE
+         WHEN v.units_sold_30d > 0
+         THEN ROUND(v.quantity_on_hand / (v.units_sold_30d / 30.0))
+         ELSE NULL
+       END                                       AS "daysOfStockRemaining"
+     FROM velocity v
+     JOIN commerce_products p
+       ON p.id = v.product_id AND p.organization_id = v.organization_id
+     JOIN commerce_stores s
+       ON s.id = v.store_id AND s.organization_id = v.organization_id
+     WHERE p.active = true
+       AND (
+         v.quantity_on_hand <= v.reorder_threshold
+         OR (
+           v.units_sold_30d > 0
+           AND v.quantity_on_hand / (v.units_sold_30d / 30.0) < 7
+         )
+       )
+     ORDER BY
+       CASE WHEN v.units_sold_30d > 0
+         THEN v.quantity_on_hand / (v.units_sold_30d / 30.0)
+         ELSE 999
+       END ASC
+     LIMIT 20`,
+    params
+  );
+
+  return {
+    organizationId,
+    organizationName: orgRow.rows[0]?.name ?? organizationId,
+    storeId: storeId ?? null,
+    generatedAt: new Date().toISOString(),
+    items: result.rows,
+  };
+}
+
+// ── Forecast snapshot ─────────────────────────────────────────────────────────
+
+export async function buildForecastInputSnapshot(organizationId, storeId, dateFrom, dateTo) {
+  const params = [organizationId, dateFrom, dateTo];
+  const storeClause = storeId ? `AND o.store_id = $${params.push(storeId)}` : "";
+
+  const [orgRow, salesRows, storeRow] = await Promise.all([
+    pool.query(`SELECT name FROM commerce_organizations WHERE id = $1`, [organizationId]),
+    pool.query(
+      `SELECT
+         DATE(o.created_at)    AS date,
+         COUNT(o.id)           AS "orderCount",
+         SUM(o.total_cents)    AS "salesCents"
+       FROM commerce_orders o
+       WHERE o.organization_id = $1
+         AND o.status = 'paid'
+         AND o.created_at >= $2 AND o.created_at < $3
+         ${storeClause}
+       GROUP BY DATE(o.created_at)
+       ORDER BY date`,
+      params
+    ),
+    storeId
+      ? pool.query(`SELECT name FROM commerce_stores WHERE id = $1`, [storeId])
+      : Promise.resolve({ rows: [] }),
+  ]);
+
+  return {
+    organizationId,
+    organizationName: orgRow.rows[0]?.name ?? organizationId,
+    storeName: storeRow.rows[0]?.name ?? null,
+    dateFrom,
+    dateTo,
+    generatedAt: new Date().toISOString(),
+    dailySales: salesRows.rows.map((r) => ({
+      date: String(r.date).slice(0, 10),
+      orderCount: Number(r.orderCount),
+      salesCents: Number(r.salesCents),
+    })),
+  };
+}
+
+// ── Guardian digest snapshot ──────────────────────────────────────────────────
+
+export async function getGuardiansForDigest(organizationId) {
+  const result = await pool.query(
+    `SELECT id, name, email,
+            notification_prefs->>'email_on_purchase' AS email_on_purchase
+     FROM commerce_guardians
+     WHERE organization_id = $1
+       AND active = true
+       AND (notification_prefs->>'email_on_purchase')::boolean = true`,
+    [organizationId]
+  );
+  return result.rows;
+}
+
+export async function buildGuardianDigestSnapshot(organizationId, guardianId, guardianName, orgName, dateFrom, dateTo) {
+  const studentsResult = await pool.query(
+    `SELECT
+       c.id                              AS "studentId",
+       c.name                            AS "studentName",
+       wa.balance_cents                  AS "balanceCents",
+       COALESCE(
+         SUM(wt.amount_cents) FILTER (
+           WHERE wt.type = 'sale'
+             AND wt.created_at >= $3 AND wt.created_at < $4
+         ), 0
+       )                                 AS "spentCents",
+       COUNT(DISTINCT o.id) FILTER (
+         WHERE wt.type = 'sale'
+           AND wt.created_at >= $3 AND wt.created_at < $4
+       )                                 AS "transactionCount"
+     FROM commerce_guardian_students gs
+     JOIN commerce_customers c
+       ON c.id = gs.student_id
+     JOIN commerce_wallet_accounts wa
+       ON wa.customer_id = c.id AND wa.organization_id = c.organization_id
+     LEFT JOIN commerce_wallet_transactions wt
+       ON wt.wallet_account_id = wa.id
+       AND wt.organization_id = wa.organization_id
+     LEFT JOIN commerce_orders o
+       ON o.id = wt.order_id
+     WHERE gs.guardian_id = $1
+       AND gs.organization_id = $2
+     GROUP BY c.id, c.name, wa.balance_cents`,
+    [guardianId, organizationId, dateFrom, dateTo]
+  );
+
+  const students = await Promise.all(
+    studentsResult.rows.map(async (s) => {
+      const topItems = await pool.query(
+        `SELECT oi.name_snapshot AS name, SUM(oi.quantity) AS qty
+         FROM commerce_order_items oi
+         JOIN commerce_orders o ON o.id = oi.order_id
+         JOIN commerce_wallet_transactions wt ON wt.order_id = o.id
+         JOIN commerce_wallet_accounts wa ON wa.id = wt.wallet_account_id
+         WHERE wa.customer_id = $1
+           AND wa.organization_id = $2
+           AND wt.type = 'sale'
+           AND wt.created_at >= $3 AND wt.created_at < $4
+         GROUP BY oi.name_snapshot
+         ORDER BY SUM(oi.quantity) DESC
+         LIMIT 3`,
+        [s.studentId, organizationId, dateFrom, dateTo]
+      );
+      return {
+        ...s,
+        spentCents: Number(s.spentCents),
+        balanceCents: Number(s.balanceCents),
+        transactionCount: Number(s.transactionCount),
+        topItems: topItems.rows.map((r) => ({ name: r.name, qty: Number(r.qty) })),
+      };
+    })
+  );
+
+  const from = new Date(dateFrom);
+  const to = new Date(dateTo);
+  const weekLabel = `${from.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${to.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+
+  return { guardianId, guardianName, orgName, dateFrom, dateTo, weekLabel, students };
 }

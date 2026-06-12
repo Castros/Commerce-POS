@@ -35,7 +35,7 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 │   │   │   ├── transaction.js
 │   │   │   └── migrations/
 │   │   ├── modules/
-│   │   │   ├── ai/              ← closeout summaries + anomaly alerts
+│   │   │   ├── ai/              ← closeout summaries, anomaly alerts, forecasts, reorder, guardian digest
 │   │   │   ├── cashDrawers/
 │   │   │   ├── customers/
 │   │   │   ├── demo/
@@ -104,7 +104,7 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - Student credential issuance, resolution, and revocation
 - Idempotency helper, audit helper, immutable wallet transaction trigger
 - API integration tests
-- **AI module** — Daily Closeout Summary + Anomaly Alerts (see AI section below)
+- **AI module** — Closeout Summary, Anomaly Alerts, Sales Forecast, Inventory Reorder, Guardian Spending Digest, Usage tracking (see AI section below)
 - **Email module** — Resend-powered transactional email; receipt emails route to linked guardians; fire-and-forget via `setImmediate`
 - **Guardian module** — guardian CRUD, guardian-student links, guardian portal with magic-link OTP auth, notification preferences (`email_on_purchase`, `low_balance_threshold_cents`)
 - **Fee assignments module** — pre-assigned charges (field trips, fees), collectible at register via wallet/cash/card
@@ -135,7 +135,7 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - Organizations route — platform-level org CRUD (super_admin only for creation)
 - Staff route — create/edit staff with role, store assignments, and category access restrictions
 - Fees route (`/fees`) — create fee assignments, assign to students, cancel fees (manager+)
-- Reports route with AI Closeout Summaries and AI Anomaly Alerts sections
+- Reports route — tabbed layout: "Financial Reports" (summary metrics, payment breakdown, product sales) and "AI Insights" (Anomaly Alerts, Sales Forecast, Reorder Recommendations, Closeout Summaries, Guardian Digest trigger)
 - **Guardian portal** (`/parent`) — mobile-optimized parent view with magic-link login, wallet balances, purchase history per student, notification preferences toggle
 - Student app preview route for balance and POS transaction history
 - Print CSS for 72mm receipt printing
@@ -306,8 +306,14 @@ POST  /v1/ai/summaries
 PATCH /v1/ai/summaries/:id
 GET   /v1/ai/alerts?organizationId=...&status=...
 GET   /v1/ai/alerts/:id?organizationId=...
-POST  /v1/ai/alerts/scan
+POST  /v1/ai/alerts/scan                ← accepts dateFrom/dateTo
 PATCH /v1/ai/alerts/:id
+GET   /v1/ai/forecast?organizationId=...
+POST  /v1/ai/forecast                   ← 7-day forecast from date range history
+GET   /v1/ai/reorder?organizationId=...
+POST  /v1/ai/reorder                    ← reorder suggestions from inventory + sales velocity
+POST  /v1/ai/guardian-digest            ← sends AI-written digest emails to guardians (admin+)
+GET   /v1/ai/usage                      ← token/cost breakdown, platform admin only
 
 # Reports
 GET   /v1/reports/summary?organizationId=...&dateFrom=...&dateTo=...
@@ -418,6 +424,8 @@ Migrations applied in order:
 021_category_permissions.sql        ← commerce_user_category_permissions
 022_fee_assignments.sql             ← commerce_fee_assignments
 023_organization_contact_email.sql  ← contact_email column on commerce_organizations
+024_ai_cost_tracking.sql            ← cost_microdollars BIGINT on commerce_ai_records
+025_ai_new_features.sql             ← adds guardian_digest, sales_forecast to source_type check
 ```
 
 Do not edit already-applied migrations. Add a new numbered migration for schema changes.
@@ -519,11 +527,17 @@ cd web && npm run build
 
 ## AI Features
 
-The AI system is live. Read `docs/ai-feature-strategy.md` for product strategy and marketing rationale.
+The AI system is live. Read `docs/ai-feature-strategy.md` for product strategy and `docs/api-reference.md` for full endpoint reference.
 
-- **Daily Closeout Summary** — fires automatically (fire-and-forget via `setImmediate`) when `POST /v1/cash-drawers/:id/close` commits. Aggregates 6 SQL queries, hashes the facts, calls Claude Haiku 3.5, stores result in `commerce_ai_records`. Cost: ~$0.00073 per summary.
-- **Anomaly Alerts** — on-demand scan via `POST /v1/ai/alerts/scan`. Runs 4 SQL rules; LLM only called when a rule fires.
-- **Reports UI** — `/reports` shows both: AI Anomaly Alerts (severity badges, dismiss/review) and AI Closeout Summaries.
+**Model:** `claude-haiku-4-5` (replaces retired `claude-haiku-3-5-20241022`). Cost ~$0.001 per call.
+**Cost tracking:** `cost_microdollars` stored on every `commerce_ai_records` row. Visible only to platform admins via `GET /v1/ai/usage`.
+
+- **Daily Closeout Summary** — fires automatically (fire-and-forget via `setImmediate`) when `POST /v1/cash-drawers/:id/close` commits. Aggregates 6 SQL queries, hashes the facts, calls AI, stores in `commerce_ai_records`.
+- **Anomaly Alerts** — on-demand scan via `POST /v1/ai/alerts/scan`. Accepts `dateFrom`/`dateTo`. Runs 4 SQL rules; LLM only called when a rule fires. Returns "not enough data" message to UI when rules produce no hits.
+- **Sales Forecast** — on-demand via `POST /v1/ai/forecast`. Analyzes daily sales history for the selected date range; projects next 7 days with trend, confidence, and key insights.
+- **Inventory Reorder Assistant** — on-demand via `POST /v1/ai/reorder`. Finds products below reorder threshold or with <7 days of stock based on 30-day sales velocity; returns prioritized reorder list with suggested quantities.
+- **Guardian Spending Digest** — admin-triggered via `POST /v1/ai/guardian-digest`. Generates and emails a personalized weekly spending summary to each guardian with notifications enabled. Uses Resend.
+- **Reports UI** — `/reports` shows all five AI sections: Anomaly Alerts, Forecast, Reorder, Guardian Digest trigger, and Closeout Summaries.
 
 Architecture rules:
 - AI outputs live only in `commerce_ai_records`. AI never writes to financial tables.

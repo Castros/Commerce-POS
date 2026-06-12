@@ -11,258 +11,25 @@ import type { DemoStudent, Organization, Store } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
 import { avatarUrl } from "../lib/imageUrl";
 import { loadCurrentOrganization } from "../lib/organizationContext";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function resolveStoreId(raw: string, stores: Store[]): string | null {
-  if (!raw) return null;
-  if (UUID_RE.test(raw)) return stores.some((s) => s.id === raw) ? raw : null;
-  return stores.find((s) => s.name.toLowerCase() === raw.toLowerCase())?.id ?? null;
-}
-
-function buildStudentTemplate(stores: Store[]): string {
-  const locationExample = stores[0]?.name ?? "Main Cafeteria";
-  const location2 = stores[1]?.name ?? locationExample;
-  return `name,email,phone,external_id,home_location\nAna García,ana.garcia@school.mx,5551234567,2024-0001,${locationExample}\nCarlos López,,5559876543,2024-0002,${location2}\nMaría Pérez,maria@example.com,,2024-0003,\n`;
-}
-
-type StudentImportRow = {
+type CsvImportPreviewRow = {
+  row: number;
   name: string;
-  email: string;
-  phone: string;
-  externalId: string;
-  location: string;
-  _error?: string;
+  email: string | null;
+  phone: string | null;
+  externalId: string | null;
+  status: "create" | "update";
 };
 
-function parseStudentCsv(text: string): StudentImportRow[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const header = lines[0].toLowerCase().split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-  const idx = (col: string) => header.indexOf(col);
-  const get = (cells: string[], col: string) => (cells[idx(col)] || "").replace(/^"|"$/g, "").trim();
+type CsvImportPreview = {
+  total: number;
+  valid: number;
+  errors: { row: number; error: string }[];
+  preview: CsvImportPreviewRow[];
+};
 
-  return lines.slice(1).map((line) => {
-    const cells = line.split(",");
-    const name = get(cells, "name");
-    return {
-      name,
-      email: get(cells, "email"),
-      phone: get(cells, "phone"),
-      externalId: get(cells, "external_id"),
-      location: get(cells, "home_location") || get(cells, "home_store_id"),
-      _error: !name ? "Name is required" : undefined
-    };
-  }).filter((r) => r.name || r.email || r.externalId);
-}
-
-function StudentImportModal({
-  organization,
-  stores,
-  onClose,
-  onDone
-}: {
-  organization: Organization;
-  stores: Store[];
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [csvText, setCsvText] = useState("");
-  const [preview, setPreview] = useState<StudentImportRow[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ imported: number; errors: { row: number; name: string; error: string }[] } | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      setCsvText(text);
-      setPreview(parseStudentCsv(text));
-      setResult(null);
-    };
-    reader.readAsText(file);
-  }
-
-  function downloadTemplate() {
-    const a = document.createElement("a");
-    a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(buildStudentTemplate(stores));
-    a.download = "students-template.csv";
-    a.click();
-  }
-
-  async function runImport() {
-    if (!preview.length) return;
-    const valid = preview.filter((r) => !r._error);
-    if (!valid.length) return;
-    setImporting(true);
-    setImportError(null);
-    try {
-      const data = await apiPost<{ imported: number; errors: { row: number; name: string; error: string }[] }>(
-        "/customers/import",
-        {
-          organizationId: organization.id,
-          rows: valid.map((r) => ({
-            name: r.name,
-            email: r.email || null,
-            phone: r.phone || null,
-            externalId: r.externalId || null,
-            homeStoreId: resolveStoreId(r.location, stores)
-          }))
-        }
-      );
-      setResult(data);
-      if (data.errors.length === 0) onDone();
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed");
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  const validCount = preview.filter((r) => !r._error).length;
-  const errorCount = preview.filter((r) => r._error).length;
-
-  return (
-    <div className="modalOverlay" onClick={onClose}>
-      <div className="modal csvModal" onClick={(e) => e.stopPropagation()}>
-        <div className="modalHeader">
-          <h3>Import Students via CSV</h3>
-          <button type="button" onClick={onClose}>
-            <span className="material-symbols-outlined" aria-hidden="true">close</span>
-          </button>
-        </div>
-
-        <div className="modalBody">
-          {result ? (
-            <div className="importResult">
-              <p className="importResultSuccess">
-                <span className="material-symbols-outlined fill" aria-hidden="true">check_circle</span>
-                {result.imported} student{result.imported !== 1 ? "s" : ""} imported successfully.
-              </p>
-              {result.errors.length > 0 && (
-                <div className="importErrors">
-                  <strong>{result.errors.length} row{result.errors.length !== 1 ? "s" : ""} failed:</strong>
-                  {result.errors.map((e) => (
-                    <p key={e.row} className="importErrorRow">Row {e.row} ({e.name}): {e.error}</p>
-                  ))}
-                </div>
-              )}
-              <button type="button" className="btn" onClick={onClose} style={{ marginTop: 12 }}>Done</button>
-            </div>
-          ) : (
-            <>
-              <div className="csvUploadArea">
-                <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={handleFile} />
-                <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
-                  <span className="material-symbols-outlined" aria-hidden="true">upload_file</span>
-                  Choose CSV File
-                </button>
-                <span className="csvUploadOr">or</span>
-                <button type="button" className="btnGhost" onClick={downloadTemplate}>
-                  <span className="material-symbols-outlined" aria-hidden="true">download</span>
-                  Download Template
-                </button>
-              </div>
-
-              <div className="csvColumns">
-                <strong>Required:</strong>
-                <code>name</code>
-                <strong>Optional:</strong>
-                <code>email</code>
-                <code>phone</code>
-                <code>external_id</code>
-                <code>home_location</code>
-                <span className="csvColumnNote">(matricula used for upsert; home_location accepts store name or ID)</span>
-              </div>
-
-              {stores.length > 0 && (
-                <div className="csvLocationRef">
-                  <strong>Available locations for <code>home_location</code> column:</strong>
-                  <table className="csvLocationTable">
-                    <thead><tr><th>Store name (use in CSV)</th><th>ID</th></tr></thead>
-                    <tbody>
-                      {stores.map((s) => (
-                        <tr key={s.id}>
-                          <td><strong>{s.name}</strong></td>
-                          <td className="csvLocationId">{s.id}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <textarea
-                className="csvPasteArea"
-                placeholder="Or paste CSV content here…"
-                value={csvText}
-                onChange={(e) => { setCsvText(e.target.value); setPreview(parseStudentCsv(e.target.value)); setResult(null); }}
-                rows={5}
-              />
-
-              {importError && <p className="pageError">{importError}</p>}
-
-              {preview.length > 0 && (
-                <div className="csvPreview">
-                  <div className="csvPreviewHeader">
-                    <span>Preview — {preview.length} row{preview.length !== 1 ? "s" : ""}</span>
-                    {errorCount > 0 && <span className="statusBadge statusBadge--warning">{errorCount} invalid</span>}
-                    {validCount > 0 && <span className="statusBadge statusBadge--success">{validCount} valid</span>}
-                  </div>
-                  <div className="csvPreviewTable">
-                    <table>
-                      <thead>
-                        <tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Ext. ID</th><th>Location</th><th></th></tr>
-                      </thead>
-                      <tbody>
-                        {preview.slice(0, 20).map((row, i) => {
-                          const resolvedId = resolveStoreId(row.location, stores);
-                          const resolvedName = resolvedId ? stores.find((s) => s.id === resolvedId)?.name : null;
-                          const locationBad = row.location && !resolvedId;
-                          return (
-                            <tr key={i} className={row._error ? "csvRowError" : ""}>
-                              <td>{i + 1}</td>
-                              <td>{row.name}</td>
-                              <td>{row.email || "—"}</td>
-                              <td>{row.phone || "—"}</td>
-                              <td>{row.externalId || "—"}</td>
-                              <td>
-                                {resolvedName
-                                  ? <span className="csvLocationOk">{resolvedName}</span>
-                                  : locationBad
-                                  ? <span className="csvErrorMsg">"{row.location}" not found</span>
-                                  : <span className="csvMuted">—</span>}
-                              </td>
-                              <td>{row._error ? <span className="csvErrorMsg">{row._error}</span> : null}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {preview.length > 20 && <p className="csvPreviewMore">…and {preview.length - 20} more rows</p>}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {!result && (
-          <div className="modalFooter">
-            <button type="button" className="btn" onClick={runImport} disabled={importing || validCount === 0}>
-              {importing ? "Importing…" : `Import ${validCount} Student${validCount !== 1 ? "s" : ""}`}
-            </button>
-            <button type="button" className="btnGhost" onClick={onClose}>Cancel</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+type CsvImportResult = { created: number; updated: number; skipped: number; errors: { row: number; error: string }[] };
 
 type BulkPreviewRow = {
   row: number;
@@ -487,6 +254,7 @@ const emptyForm: AddForm = { name: "", externalId: "", email: "", phone: "", hom
 type CustomerWithLocation = DemoStudent & { homeStoreId?: string | null };
 
 export function CustomersClient() {
+  const { t } = useLanguage();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [students, setStudents] = useState<CustomerWithLocation[]>([]);
@@ -500,6 +268,15 @@ export function CustomersClient() {
   const [filterStore, setFilterStore] = useState<string>("");
   const [showImport, setShowImport] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+
+  // CSV import state
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreviewing, setImportPreviewing] = useState(false);
+  const [importPreview, setImportPreview] = useState<CsvImportPreview | null>(null);
+  const [importApplying, setImportApplying] = useState(false);
+  const [importResult, setImportResult] = useState<CsvImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   async function loadStudents(existingOrg?: Organization) {
     try {
@@ -534,6 +311,75 @@ export function CustomersClient() {
     void loadStudents();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function downloadImportTemplate() {
+    const csv = `name,email,phone,external_id\nJohn Smith,john@example.com,,STU-001\n`;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "students-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(file: File) {
+    if (!organization) return;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("organizationId", organization.id);
+      const res = await fetch("/api/v1/customers/import/preview", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: CsvImportPreview; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Preview failed");
+      setImportPreview(json.data!);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setImportPreviewing(false);
+    }
+  }
+
+  async function applyStudentImport() {
+    if (!organization || !importFile) return;
+    setImportApplying(true);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("organizationId", organization.id);
+      const res = await fetch("/api/v1/customers/import/apply", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: CsvImportResult; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Import failed");
+      setImportResult(json.data!);
+      void loadStudents(organization);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportApplying(false);
+    }
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+  }
 
   const selected = useMemo(() => students.find((s) => s.id === selectedId) || null, [students, selectedId]);
 
@@ -601,9 +447,8 @@ export function CustomersClient() {
     <section className="module">
       <PageHeader eyebrow="Student accounts" title="Customers">
         <button type="button" onClick={() => void loadStudents()}>Refresh</button>
-        <button type="button" className="btnGhost" onClick={() => setShowImport(true)}>
-          <span className="material-symbols-outlined" aria-hidden="true">upload_file</span>
-          Import CSV
+        <button type="button" onClick={() => setShowImport(true)}>
+          {t("common.importCsv")}
         </button>
         <button type="button" className="btnGhost" onClick={() => setShowBulkImport(true)}>
           <span className="material-symbols-outlined" aria-hidden="true">folder_zip</span>
@@ -754,14 +599,153 @@ export function CustomersClient() {
         </aside>
       </div>
 
-      {showImport && organization && (
-        <StudentImportModal
-          organization={organization}
-          stores={stores}
-          onClose={() => setShowImport(false)}
-          onDone={() => { setShowImport(false); void loadStudents(); }}
-        />
+      {/* ── CSV Import overlay ── */}
+      {showImport && (
+        <div className="importOverlay">
+          <div className="importPanel">
+            <div className="importPanelHeader">
+              <strong>{t("customers.import.title")}</strong>
+              <button type="button" className="importPanelClose" onClick={closeImport}>✕</button>
+            </div>
+
+            {!importResult ? (
+              <>
+                <div className="importInstructions">
+                  <p>
+                    {t("customers.import.instructions")} <code>name</code>.{" "}
+                    {t("customers.import.optionalColumns")} <code>email</code>, <code>phone</code>, <code>external_id</code>.
+                  </p>
+                  <button type="button" className="importTemplateBtn" onClick={downloadImportTemplate}>
+                    <span className="material-symbols-outlined">download</span>
+                    {t("common.downloadTemplate")}
+                  </button>
+                </div>
+
+                <div
+                  className="importDropZone"
+                  onClick={() => importFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files[0];
+                    if (file) void handleImportFile(file);
+                  }}
+                >
+                  <span className="material-symbols-outlined">upload_file</span>
+                  {importFile ? (
+                    <span>{importFile.name}</span>
+                  ) : (
+                    <span>{t("customers.import.dropZone")}</span>
+                  )}
+                </div>
+
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportFile(file);
+                    e.target.value = "";
+                  }}
+                />
+
+                {importPreviewing && <p className="importHint">{t("customers.import.parsing")}</p>}
+                {importError && <p className="demoError">{importError}</p>}
+
+                {importPreview && (
+                  <>
+                    <div className="importSummaryBar">
+                      <span className="importSummaryItem importSummaryItem--ok">
+                        {importPreview.preview.filter((r) => r.status === "create").length} {t("customers.import.toCreate")}
+                      </span>
+                      {importPreview.preview.filter((r) => r.status === "update").length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--skip">
+                          {importPreview.preview.filter((r) => r.status === "update").length} {t("customers.import.toUpdate")}
+                        </span>
+                      )}
+                      {importPreview.errors.length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--err">
+                          {importPreview.errors.length} {t("customers.import.errorsFound")}
+                        </span>
+                      )}
+                    </div>
+
+                    {importPreview.errors.length > 0 && (
+                      <div className="importErrorList">
+                        {importPreview.errors.map((e) => (
+                          <p key={e.row} className="importErrorRow">Row {e.row}: {e.error}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="importTableWrap">
+                      <table className="importTable">
+                        <thead>
+                          <tr>
+                            <th>{t("customers.import.colName")}</th>
+                            <th>{t("customers.import.colEmail")}</th>
+                            <th>{t("customers.import.colPhone")}</th>
+                            <th>{t("customers.import.colExternalId")}</th>
+                            <th>{t("customers.import.colStatus")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.preview.map((row) => (
+                            <tr key={row.row} className={row.status === "update" ? "importRowSkip" : ""}>
+                              <td>{row.name}</td>
+                              <td>{row.email ?? "—"}</td>
+                              <td>{row.phone ?? "—"}</td>
+                              <td>{row.externalId ?? "—"}</td>
+                              <td>
+                                <span className={`importStatusBadge importStatusBadge--${row.status}`}>
+                                  {row.status === "update" ? t("customers.import.updateLabel") : t("customers.import.createLabel")}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="importActions">
+                      <button
+                        type="button"
+                        className="btnPrimary"
+                        onClick={() => void applyStudentImport()}
+                        disabled={importApplying || importPreview.valid === 0}
+                      >
+                        {importApplying
+                          ? t("customers.import.importing")
+                          : `${t("customers.import.confirmBtn")} ${importPreview.valid} ${t("customers.import.studentsLabel")}`}
+                      </button>
+                      <button type="button" onClick={closeImport}>{t("common.cancel")}</button>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="importResultPanel">
+                <span className="material-symbols-outlined importResultIcon">check_circle</span>
+                <h3>{t("customers.import.doneTitle")}</h3>
+                {importResult.created > 0 && <p><strong>{importResult.created}</strong> {t("customers.import.created")}</p>}
+                {importResult.updated > 0 && <p><strong>{importResult.updated}</strong> {t("customers.import.updated")}</p>}
+                {importResult.skipped > 0 && <p>{importResult.skipped} {t("customers.import.skipped")}</p>}
+                {importResult.errors.length > 0 && (
+                  <div className="importErrorList">
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="importErrorRow">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="btnPrimary" onClick={closeImport}>{t("common.done")}</button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
+
       {showBulkImport && organization && (
         <BulkImportModal
           organization={organization}

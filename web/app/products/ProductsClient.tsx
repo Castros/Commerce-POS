@@ -11,6 +11,7 @@ import type { Category, DemoSchoolData, Product } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
 import { loadRegisterContext } from "../lib/organizationContext";
 import { productCategory } from "../lib/productUtils";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
 type ProductForm = {
   name: string;
@@ -115,6 +116,7 @@ type ImportPreview = {
 type ImportResult = { created: number; skipped: number; errors: { row: number; error: string }[] };
 
 export function ProductsClient() {
+  const { t } = useLanguage();
   const [demo, setDemo] = useState<DemoSchoolData | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -409,7 +411,7 @@ export function ProductsClient() {
               Add product
             </button>
             <button type="button" onClick={() => setShowImport(true)}>
-              Import CSV
+              {t("products.importCsv")}
             </button>
           </>
         ) : (
@@ -804,17 +806,17 @@ export function ProductsClient() {
         <div className="importOverlay">
           <div className="importPanel">
             <div className="importPanelHeader">
-              <strong>Import products from CSV</strong>
+              <strong>{t("products.import.title")}</strong>
               <button type="button" className="importPanelClose" onClick={closeImport}>✕</button>
             </div>
 
             {!importResult ? (
               <>
                 <div className="importInstructions">
-                  <p>Upload a CSV file with your products. Required columns: <code>name</code>, <code>price</code>. Optional: <code>sku</code>, <code>description</code>, <code>category</code>, <code>taxable</code>, <code>active</code>.</p>
+                  <p>{t("products.import.instructions")} <code>name</code>, <code>price</code>. {t("products.import.optionalColumns")} <code>sku</code>, <code>description</code>, <code>category</code>, <code>taxable</code>, <code>active</code>.</p>
                   <button type="button" className="importTemplateBtn" onClick={downloadTemplate}>
                     <span className="material-symbols-outlined">download</span>
-                    Download template
+                    {t("products.import.downloadTemplate")}
                   </button>
                 </div>
 
@@ -832,7 +834,7 @@ export function ProductsClient() {
                   {importFile ? (
                     <span>{importFile.name}</span>
                   ) : (
-                    <span>Click or drag a .csv file here</span>
+                    <span>{t("products.import.dropZone")}</span>
                   )}
                 </div>
 
@@ -848,23 +850,23 @@ export function ProductsClient() {
                   }}
                 />
 
-                {importPreviewing && <p className="importHint">Parsing file…</p>}
+                {importPreviewing && <p className="importHint">{t("products.import.parsing")}</p>}
                 {importError && <p className="demoError">{importError}</p>}
 
                 {importPreview && (
                   <>
                     <div className="importSummaryBar">
                       <span className="importSummaryItem importSummaryItem--ok">
-                        {importPreview.preview.filter((r) => r.status === "create").length} to create
+                        {importPreview.preview.filter((r) => r.status === "create").length} {t("products.import.toCreate")}
                       </span>
                       {importPreview.preview.filter((r) => r.status === "skip").length > 0 && (
                         <span className="importSummaryItem importSummaryItem--skip">
-                          {importPreview.preview.filter((r) => r.status === "skip").length} skipped (SKU exists)
+                          {importPreview.preview.filter((r) => r.status === "skip").length} {t("products.import.skippedSku")}
                         </span>
                       )}
                       {importPreview.errors.length > 0 && (
                         <span className="importSummaryItem importSummaryItem--err">
-                          {importPreview.errors.length} errors
+                          {importPreview.errors.length} {t("products.import.errorsFound")}
                         </span>
                       )}
                     </div>
@@ -881,11 +883,11 @@ export function ProductsClient() {
                       <table className="importTable">
                         <thead>
                           <tr>
-                            <th>Name</th>
-                            <th>SKU</th>
-                            <th>Price</th>
-                            <th>Category</th>
-                            <th>Status</th>
+                            <th>{t("products.import.colName")}</th>
+                            <th>{t("products.import.colSku")}</th>
+                            <th>{t("products.import.colPrice")}</th>
+                            <th>{t("products.import.colCategory")}</th>
+                            <th>{t("products.import.colStatus")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -897,13 +899,13 @@ export function ProductsClient() {
                               <td>
                                 {row.categoryName ? (
                                   <span className={row.categoryMatched ? "importCatMatch" : "importCatMiss"}>
-                                    {row.categoryName}{!row.categoryMatched && " (not found)"}
+                                    {row.categoryName}{!row.categoryMatched && ` ${t("products.import.catNotFound")}`}
                                   </span>
                                 ) : "—"}
                               </td>
                               <td>
                                 <span className={`importStatusBadge importStatusBadge--${row.status}`}>
-                                  {row.status === "skip" ? "Skip" : "Create"}
+                                  {row.status === "skip" ? t("products.import.skipLabel") : t("products.import.createLabel")}
                                 </span>
                               </td>
                             </tr>
@@ -919,7 +921,7 @@ export function ProductsClient() {
                         onClick={() => void applyImport()}
                         disabled={importApplying || importPreview.preview.filter((r) => r.status === "create").length === 0}
                       >
-                        {importApplying ? "Importing…" : `Import ${importPreview.preview.filter((r) => r.status === "create").length} products`}
+                        {importApplying ? t("products.import.importing") : `${t("products.import.confirmBtn")} ${importPreview.preview.filter((r) => r.status === "create").length} ${t("products.import.productsLabel")}`}
                       </button>
                       <button type="button" onClick={closeImport}>Cancel</button>
                     </div>
@@ -929,9 +931,9 @@ export function ProductsClient() {
             ) : (
               <div className="importResultPanel">
                 <span className="material-symbols-outlined importResultIcon">check_circle</span>
-                <h3>Import complete</h3>
-                <p><strong>{importResult.created}</strong> products created</p>
-                {importResult.skipped > 0 && <p>{importResult.skipped} skipped (SKU already exists)</p>}
+                <h3>{t("products.import.doneTitle")}</h3>
+                <p><strong>{importResult.created}</strong> {t("products.import.created")}</p>
+                {importResult.skipped > 0 && <p>{importResult.skipped} {t("products.import.skippedResult")}</p>}
                 {importResult.errors.length > 0 && (
                   <div className="importErrorList">
                     {importResult.errors.map((e, i) => (

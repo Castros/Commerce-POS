@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { PageHeader } from "../components/PageHeader";
 import AvatarUpload from "../components/AvatarUpload";
 import { apiGet, apiPatch, apiPost, apiPut } from "../lib/api";
 import { loadCurrentOrganization } from "../lib/organizationContext";
 import type { Category, Store } from "../lib/demoTypes";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
 type StaffMember = {
   id: string;
@@ -48,6 +49,23 @@ const ROLE_COLORS: Record<string, string> = {
 
 const CATEGORY_RESTRICTED_ROLES = new Set(["store_manager", "cashier", "accountant"]);
 
+type StaffCsvPreviewRow = {
+  row: number;
+  name: string;
+  email: string | null;
+  role: string | null;
+  status: "create" | "skip";
+};
+
+type StaffCsvPreview = {
+  total: number;
+  valid: number;
+  errors: { row: number; error: string }[];
+  preview: StaffCsvPreviewRow[];
+};
+
+type StaffCsvResult = { created: number; skipped: number; errors: { row: number; error: string }[] };
+
 function blankForm(): FormState {
   return { name: "", email: "", role: "cashier", pin: "", storeIds: [], categoryIds: [], active: true };
 }
@@ -65,6 +83,7 @@ function staffToForm(s: StaffMember): FormState {
 }
 
 export function StaffClient() {
+  const { t } = useLanguage();
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
@@ -75,6 +94,16 @@ export function StaffClient() {
   const [editTarget, setEditTarget] = useState<StaffMember | null>(null);
   const [form, setForm] = useState<FormState>(blankForm());
   const [saving, setSaving] = useState(false);
+
+  // CSV import state
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreviewing, setImportPreviewing] = useState(false);
+  const [importPreview, setImportPreview] = useState<StaffCsvPreview | null>(null);
+  const [importApplying, setImportApplying] = useState(false);
+  const [importResult, setImportResult] = useState<StaffCsvResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   useEffect(() => {
     void loadAll();
@@ -99,6 +128,75 @@ export function StaffClient() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function downloadImportTemplate() {
+    const csv = `name,email,role,pin,phone\nJohn Cashier,cashier@school.com,cashier,1234,\n`;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "staff-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(file: File) {
+    if (!organizationId) return;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("organizationId", organizationId);
+      const res = await fetch("/api/v1/staff/import/preview", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: StaffCsvPreview; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Preview failed");
+      setImportPreview(json.data!);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setImportPreviewing(false);
+    }
+  }
+
+  async function applyStaffImport() {
+    if (!organizationId || !importFile) return;
+    setImportApplying(true);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("organizationId", organizationId);
+      const res = await fetch("/api/v1/staff/import/apply", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: StaffCsvResult; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Import failed");
+      setImportResult(json.data!);
+      void loadAll();
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportApplying(false);
+    }
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
   }
 
   function openCreate() {
@@ -247,6 +345,9 @@ export function StaffClient() {
         <button type="button" onClick={loadAll} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
         </button>
+        <button type="button" onClick={() => setShowImport(true)}>
+          {t("common.importCsv")}
+        </button>
         <button type="button" className="primaryAction" onClick={openCreate}>
           Add staff
         </button>
@@ -356,6 +457,152 @@ export function StaffClient() {
           </tbody>
         </table>
       </div>
+
+      {/* ── CSV Import overlay ── */}
+      {showImport && (
+        <div className="importOverlay">
+          <div className="importPanel">
+            <div className="importPanelHeader">
+              <strong>{t("staff.import.title")}</strong>
+              <button type="button" className="importPanelClose" onClick={closeImport}>✕</button>
+            </div>
+
+            {!importResult ? (
+              <>
+                <div className="importInstructions">
+                  <p>
+                    {t("staff.import.instructions")} <code>name</code>, <code>email</code>, <code>role</code>, <code>pin</code>.{" "}
+                    {t("staff.import.optionalColumns")} <code>phone</code>.
+                  </p>
+                  <p className="importHint">{t("staff.import.roleNote")}</p>
+                  <p className="importHint">{t("staff.import.pinNote")}</p>
+                  <button type="button" className="importTemplateBtn" onClick={downloadImportTemplate}>
+                    <span className="material-symbols-outlined">download</span>
+                    {t("common.downloadTemplate")}
+                  </button>
+                </div>
+
+                <div
+                  className="importDropZone"
+                  onClick={() => importFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files[0];
+                    if (file) void handleImportFile(file);
+                  }}
+                >
+                  <span className="material-symbols-outlined">upload_file</span>
+                  {importFile ? (
+                    <span>{importFile.name}</span>
+                  ) : (
+                    <span>{t("staff.import.dropZone")}</span>
+                  )}
+                </div>
+
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportFile(file);
+                    e.target.value = "";
+                  }}
+                />
+
+                {importPreviewing && <p className="importHint">{t("staff.import.parsing")}</p>}
+                {importError && <p className="demoError">{importError}</p>}
+
+                {importPreview && (
+                  <>
+                    <div className="importSummaryBar">
+                      <span className="importSummaryItem importSummaryItem--ok">
+                        {importPreview.preview.filter((r) => r.status === "create").length} {t("staff.import.toCreate")}
+                      </span>
+                      {importPreview.preview.filter((r) => r.status === "skip").length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--skip">
+                          {importPreview.preview.filter((r) => r.status === "skip").length} {t("staff.import.skipped")}
+                        </span>
+                      )}
+                      {importPreview.errors.length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--err">
+                          {importPreview.errors.length} {t("staff.import.errorsFound")}
+                        </span>
+                      )}
+                    </div>
+
+                    {importPreview.errors.length > 0 && (
+                      <div className="importErrorList">
+                        {importPreview.errors.map((e) => (
+                          <p key={e.row} className="importErrorRow">Row {e.row}: {e.error}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="importTableWrap">
+                      <table className="importTable">
+                        <thead>
+                          <tr>
+                            <th>{t("staff.import.colName")}</th>
+                            <th>{t("staff.import.colEmail")}</th>
+                            <th>{t("staff.import.colRole")}</th>
+                            <th>{t("staff.import.colStatus")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.preview.map((row) => (
+                            <tr key={row.row} className={row.status === "skip" ? "importRowSkip" : ""}>
+                              <td>{row.name}</td>
+                              <td>{row.email ?? "—"}</td>
+                              <td>{row.role ?? "—"}</td>
+                              <td>
+                                <span className={`importStatusBadge importStatusBadge--${row.status}`}>
+                                  {row.status === "skip" ? t("staff.import.skipLabel") : t("staff.import.createLabel")}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="importActions">
+                      <button
+                        type="button"
+                        className="btnPrimary"
+                        onClick={() => void applyStaffImport()}
+                        disabled={importApplying || importPreview.preview.filter((r) => r.status === "create").length === 0}
+                      >
+                        {importApplying
+                          ? t("staff.import.importing")
+                          : `${t("staff.import.confirmBtn")} ${importPreview.preview.filter((r) => r.status === "create").length} ${t("staff.import.staffLabel")}`}
+                      </button>
+                      <button type="button" onClick={closeImport}>{t("common.cancel")}</button>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="importResultPanel">
+                <span className="material-symbols-outlined importResultIcon">check_circle</span>
+                <h3>{t("staff.import.doneTitle")}</h3>
+                {importResult.created > 0 && <p><strong>{importResult.created}</strong> {t("staff.import.created")}</p>}
+                {importResult.skipped > 0 && <p>{importResult.skipped} {t("staff.import.skipped")}</p>}
+                {importResult.errors.length > 0 && (
+                  <div className="importErrorList">
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="importErrorRow">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="btnPrimary" onClick={closeImport}>{t("common.done")}</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {panel !== "none" ? (
         <div className="staffPanelOverlay" onClick={closePanel}>

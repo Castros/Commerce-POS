@@ -6,324 +6,27 @@ import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { formatMoney } from "../lib/format";
 import { loadCurrentOrganization } from "../lib/organizationContext";
 import type { Organization, Store } from "../lib/demoTypes";
+import { useLanguage } from "../lib/i18n/LanguageContext";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function resolveStoreId(raw: string, stores: Store[]): string | null {
-  if (!raw) return null;
-  if (UUID_RE.test(raw)) return stores.some((s) => s.id === raw) ? raw : null;
-  return stores.find((s) => s.name.toLowerCase() === raw.toLowerCase())?.id ?? null;
-}
-
-function buildEmployeeTemplate(stores: Store[]): string {
-  const loc1 = stores[0]?.name ?? "Main Cafeteria";
-  const loc2 = stores[1]?.name ?? loc1;
-  return (
-    `name,email,phone,employee_number,department,job_title,payroll_deduction_enabled,deduction_cycle,credit_limit,home_location\n` +
-    `María González,maria@school.mx,5551234567,EMP-001,Teaching,3rd Grade Teacher,true,biweekly,500,${loc1}\n` +
-    `Roberto Díaz,,5559876543,EMP-002,Administration,Principal,true,monthly,500,${loc2}\n` +
-    `Ana Torres,ana@school.mx,,EMP-003,Support,Custodian,true,biweekly,200,\n`
-  );
-}
-
-type EmpImportRow = {
+type EmpCsvPreviewRow = {
+  row: number;
   name: string;
-  email: string;
-  phone: string;
-  location: string;
-  employeeNumber: string;
-  department: string;
-  jobTitle: string;
-  payrollDeductionEnabled: boolean;
-  deductionCycle: "weekly" | "biweekly" | "monthly";
-  maxCreditCents: number;
-  _error?: string;
+  email: string | null;
+  department: string | null;
+  jobTitle: string | null;
+  employeeNumber: string | null;
+  status: "create" | "update";
 };
 
-function parseEmployeeCsv(text: string): EmpImportRow[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const header = lines[0].toLowerCase().split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-  const idx = (col: string) => header.indexOf(col);
-  const get = (cells: string[], col: string) => (cells[idx(col)] || "").replace(/^"|"$/g, "").trim();
+type EmpCsvPreview = {
+  total: number;
+  valid: number;
+  errors: { row: number; error: string }[];
+  preview: EmpCsvPreviewRow[];
+};
 
-  return lines.slice(1).map((line) => {
-    const cells = line.split(",");
-    const name = get(cells, "name");
-    const cycleRaw = get(cells, "deduction_cycle").toLowerCase();
-    const cycle = ["weekly", "biweekly", "monthly"].includes(cycleRaw)
-      ? (cycleRaw as "weekly" | "biweekly" | "monthly")
-      : "biweekly";
-    const creditRaw = parseFloat(get(cells, "credit_limit") || "500");
-    const maxCreditCents = isFinite(creditRaw) ? Math.round(creditRaw * 100) : 50000;
-    const dedRaw = get(cells, "payroll_deduction_enabled").toLowerCase();
-    const payrollDeductionEnabled = dedRaw !== "false" && dedRaw !== "0";
-    return {
-      name,
-      email: get(cells, "email"),
-      phone: get(cells, "phone"),
-      location: get(cells, "home_location") || get(cells, "home_store_id"),
-      employeeNumber: get(cells, "employee_number"),
-      department: get(cells, "department"),
-      jobTitle: get(cells, "job_title"),
-      payrollDeductionEnabled,
-      deductionCycle: cycle,
-      maxCreditCents,
-      _error: !name ? "Name is required" : undefined
-    };
-  }).filter((r) => r.name || r.employeeNumber || r.email);
-}
-
-function EmployeeImportModal({
-  organization,
-  stores,
-  onClose,
-  onDone
-}: {
-  organization: Organization;
-  stores: Store[];
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [csvText, setCsvText] = useState("");
-  const [preview, setPreview] = useState<EmpImportRow[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{
-    imported: number;
-    updated: number;
-    errors: { row: number; name: string; error: string }[];
-  } | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      setCsvText(text);
-      setPreview(parseEmployeeCsv(text));
-      setResult(null);
-    };
-    reader.readAsText(file);
-  }
-
-  function handlePaste(text: string) {
-    setCsvText(text);
-    setPreview(parseEmployeeCsv(text));
-    setResult(null);
-  }
-
-  function downloadTemplate() {
-    const a = document.createElement("a");
-    a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(buildEmployeeTemplate(stores));
-    a.download = "employees-template.csv";
-    a.click();
-  }
-
-  async function runImport() {
-    if (!preview.length) return;
-    const valid = preview.filter((r) => !r._error);
-    if (!valid.length) return;
-    setImporting(true);
-    setImportError(null);
-    try {
-      const data = await apiPost<{ imported: number; updated: number; errors: { row: number; name: string; error: string }[] }>(
-        "/employees/import",
-        {
-          organizationId: organization.id,
-          rows: valid.map((r) => ({
-            name: r.name,
-            email: r.email || null,
-            phone: r.phone || null,
-            homeStoreId: resolveStoreId(r.location, stores),
-            employeeNumber: r.employeeNumber || null,
-            department: r.department || null,
-            jobTitle: r.jobTitle || null,
-            payrollDeductionEnabled: r.payrollDeductionEnabled,
-            deductionCycle: r.deductionCycle,
-            maxCreditCents: r.maxCreditCents
-          }))
-        }
-      );
-      setResult(data);
-      if (data.errors.length === 0) {
-        onDone();
-      }
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : "Import failed");
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  const validCount = preview.filter((r) => !r._error).length;
-  const errorCount = preview.filter((r) => r._error).length;
-
-  return (
-    <div className="modalOverlay" onClick={onClose}>
-      <div className="modal csvModal" onClick={(e) => e.stopPropagation()}>
-        <div className="modalHeader">
-          <h3>Import Employees via CSV</h3>
-          <button type="button" onClick={onClose}>
-            <span className="material-symbols-outlined" aria-hidden="true">close</span>
-          </button>
-        </div>
-
-        <div className="modalBody">
-          {result ? (
-            <div className="importResult">
-              <p className="importResultSuccess">
-                <span className="material-symbols-outlined fill" aria-hidden="true">check_circle</span>
-                {result.imported} created, {result.updated} updated.
-              </p>
-              {result.errors.length > 0 && (
-                <div className="importErrors">
-                  <strong>{result.errors.length} row{result.errors.length !== 1 ? "s" : ""} failed:</strong>
-                  {result.errors.map((e) => (
-                    <p key={e.row} className="importErrorRow">Row {e.row} ({e.name}): {e.error}</p>
-                  ))}
-                </div>
-              )}
-              <button type="button" className="btn" onClick={onClose} style={{ marginTop: 12 }}>Done</button>
-            </div>
-          ) : (
-            <>
-              <div className="csvUploadArea">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  style={{ display: "none" }}
-                  onChange={handleFile}
-                />
-                <button type="button" className="btn" onClick={() => fileRef.current?.click()}>
-                  <span className="material-symbols-outlined" aria-hidden="true">upload_file</span>
-                  Choose CSV File
-                </button>
-                <span className="csvUploadOr">or</span>
-                <button type="button" className="btnGhost" onClick={downloadTemplate}>
-                  <span className="material-symbols-outlined" aria-hidden="true">download</span>
-                  Download Template
-                </button>
-              </div>
-
-              <div className="csvColumns">
-                <strong>Required:</strong>
-                <code>name</code>
-                <strong>Optional:</strong>
-                <code>email</code>
-                <code>phone</code>
-                <code>employee_number</code>
-                <code>department</code>
-                <code>job_title</code>
-                <code>payroll_deduction_enabled</code>
-                <code>deduction_cycle</code>
-                <code>credit_limit</code>
-                <code>home_location</code>
-                <span className="csvColumnNote">(employee_number used to match existing records; home_location accepts store name or ID)</span>
-              </div>
-
-              {stores.length > 0 && (
-                <div className="csvLocationRef">
-                  <strong>Available locations for <code>home_location</code> column:</strong>
-                  <table className="csvLocationTable">
-                    <thead><tr><th>Store name (use in CSV)</th><th>ID</th></tr></thead>
-                    <tbody>
-                      {stores.map((s) => (
-                        <tr key={s.id}>
-                          <td><strong>{s.name}</strong></td>
-                          <td className="csvLocationId">{s.id}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <textarea
-                className="csvPasteArea"
-                placeholder="Or paste CSV content here…"
-                value={csvText}
-                onChange={(e) => handlePaste(e.target.value)}
-                rows={5}
-              />
-
-              {importError && <p className="pageError">{importError}</p>}
-
-              {preview.length > 0 && (
-                <div className="csvPreview">
-                  <div className="csvPreviewHeader">
-                    <span>Preview — {preview.length} row{preview.length !== 1 ? "s" : ""}</span>
-                    {errorCount > 0 && <span className="statusBadge statusBadge--warning">{errorCount} invalid</span>}
-                    {validCount > 0 && <span className="statusBadge statusBadge--success">{validCount} valid</span>}
-                  </div>
-                  <div className="csvPreviewTable">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>Name</th>
-                          <th>Emp #</th>
-                          <th>Department</th>
-                          <th>Location</th>
-                          <th>Cycle</th>
-                          <th>Limit</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.slice(0, 20).map((row, i) => {
-                          const resolvedId = resolveStoreId(row.location, stores);
-                          const resolvedName = resolvedId ? stores.find((s) => s.id === resolvedId)?.name : null;
-                          const locationBad = row.location && !resolvedId;
-                          return (
-                            <tr key={i} className={row._error ? "csvRowError" : ""}>
-                              <td>{i + 1}</td>
-                              <td>{row.name}</td>
-                              <td>{row.employeeNumber || "—"}</td>
-                              <td>{row.department || "—"}</td>
-                              <td>
-                                {resolvedName
-                                  ? <span className="csvLocationOk">{resolvedName}</span>
-                                  : locationBad
-                                  ? <span className="csvErrorMsg">"{row.location}" not found</span>
-                                  : <span className="csvMuted">—</span>}
-                              </td>
-                              <td>{row.deductionCycle}</td>
-                              <td>${(row.maxCreditCents / 100).toFixed(0)}</td>
-                              <td>{row._error ? <span className="csvErrorMsg">{row._error}</span> : null}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {preview.length > 20 && <p className="csvPreviewMore">…and {preview.length - 20} more rows</p>}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {!result && (
-          <div className="modalFooter">
-            <button
-              type="button"
-              className="btn"
-              onClick={runImport}
-              disabled={importing || validCount === 0}
-            >
-              {importing ? "Importing…" : `Import ${validCount} Employee${validCount !== 1 ? "s" : ""}`}
-            </button>
-            <button type="button" className="btnGhost" onClick={onClose}>Cancel</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+type EmpCsvResult = { created: number; updated: number; skipped: number; errors: { row: number; error: string }[] };
 
 type EmployeeProfile = {
   id: string;
@@ -385,6 +88,7 @@ const emptyCreate: CreateForm = {
 };
 
 export function EmployeesClient() {
+  const { t } = useLanguage();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -399,6 +103,16 @@ export function EmployeesClient() {
   const [formError, setFormError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Employee | null>(null);
   const [showImport, setShowImport] = useState(false);
+
+  // CSV import state
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreviewing, setImportPreviewing] = useState(false);
+  const [importPreview, setImportPreview] = useState<EmpCsvPreview | null>(null);
+  const [importApplying, setImportApplying] = useState(false);
+  const [importResult, setImportResult] = useState<EmpCsvResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
   const [editForm, setEditForm] = useState<{
     name?: string;
     email?: string;
@@ -448,6 +162,75 @@ export function EmployeesClient() {
     if (organization) void load(organization);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, filterDept]);
+
+  function downloadImportTemplate() {
+    const csv = `name,email,department,job_title,employee_number,deduction_cycle\nJane Doe,jane@example.com,Kitchen,Cook,EMP-001,monthly\n`;
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "employees-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(file: File) {
+    if (!organization) return;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("organizationId", organization.id);
+      const res = await fetch("/api/v1/employees/import/preview", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: EmpCsvPreview; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Preview failed");
+      setImportPreview(json.data!);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setImportPreviewing(false);
+    }
+  }
+
+  async function applyEmployeeImport() {
+    if (!organization || !importFile) return;
+    setImportApplying(true);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("organizationId", organization.id);
+      const res = await fetch("/api/v1/employees/import/apply", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: EmpCsvResult; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Import failed");
+      setImportResult(json.data!);
+      void load(organization);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportApplying(false);
+    }
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+  }
 
   const departments = Array.from(
     new Set(employees.map((e) => e.profile?.department).filter(Boolean) as string[])
@@ -539,9 +322,8 @@ export function EmployeesClient() {
   return (
     <div className="pageContent">
       <PageHeader eyebrow="Workforce" title="Employees">
-        <button type="button" className="btnGhost" onClick={() => setShowImport(true)}>
-          <span className="material-symbols-outlined" aria-hidden="true">upload_file</span>
-          Import CSV
+        <button type="button" onClick={() => setShowImport(true)}>
+          {t("common.importCsv")}
         </button>
         <button type="button" className="btn" onClick={() => setShowCreate(true)}>
           <span className="material-symbols-outlined" aria-hidden="true">
@@ -921,16 +703,153 @@ export function EmployeesClient() {
         </div>
       )}
 
-      {showImport && organization && (
-        <EmployeeImportModal
-          organization={organization}
-          stores={stores}
-          onClose={() => setShowImport(false)}
-          onDone={() => {
-            setShowImport(false);
-            void load(organization);
-          }}
-        />
+      {/* ── CSV Import overlay ── */}
+      {showImport && (
+        <div className="importOverlay">
+          <div className="importPanel">
+            <div className="importPanelHeader">
+              <strong>{t("employees.import.title")}</strong>
+              <button type="button" className="importPanelClose" onClick={closeImport}>✕</button>
+            </div>
+
+            {!importResult ? (
+              <>
+                <div className="importInstructions">
+                  <p>
+                    {t("employees.import.instructions")} <code>name</code>.{" "}
+                    {t("employees.import.optionalColumns")} <code>email</code>, <code>department</code>, <code>job_title</code>, <code>employee_number</code>, <code>deduction_cycle</code>.
+                  </p>
+                  <button type="button" className="importTemplateBtn" onClick={downloadImportTemplate}>
+                    <span className="material-symbols-outlined">download</span>
+                    {t("common.downloadTemplate")}
+                  </button>
+                </div>
+
+                <div
+                  className="importDropZone"
+                  onClick={() => importFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files[0];
+                    if (file) void handleImportFile(file);
+                  }}
+                >
+                  <span className="material-symbols-outlined">upload_file</span>
+                  {importFile ? (
+                    <span>{importFile.name}</span>
+                  ) : (
+                    <span>{t("employees.import.dropZone")}</span>
+                  )}
+                </div>
+
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportFile(file);
+                    e.target.value = "";
+                  }}
+                />
+
+                {importPreviewing && <p className="importHint">{t("employees.import.parsing")}</p>}
+                {importError && <p className="demoError">{importError}</p>}
+
+                {importPreview && (
+                  <>
+                    <div className="importSummaryBar">
+                      <span className="importSummaryItem importSummaryItem--ok">
+                        {importPreview.preview.filter((r) => r.status === "create").length} {t("employees.import.toCreate")}
+                      </span>
+                      {importPreview.preview.filter((r) => r.status === "update").length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--skip">
+                          {importPreview.preview.filter((r) => r.status === "update").length} {t("employees.import.toUpdate")}
+                        </span>
+                      )}
+                      {importPreview.errors.length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--err">
+                          {importPreview.errors.length} {t("employees.import.errorsFound")}
+                        </span>
+                      )}
+                    </div>
+
+                    {importPreview.errors.length > 0 && (
+                      <div className="importErrorList">
+                        {importPreview.errors.map((e) => (
+                          <p key={e.row} className="importErrorRow">Row {e.row}: {e.error}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="importTableWrap">
+                      <table className="importTable">
+                        <thead>
+                          <tr>
+                            <th>{t("employees.import.colName")}</th>
+                            <th>{t("employees.import.colEmail")}</th>
+                            <th>{t("employees.import.colDepartment")}</th>
+                            <th>{t("employees.import.colJobTitle")}</th>
+                            <th>{t("employees.import.colNumber")}</th>
+                            <th>{t("employees.import.colStatus")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.preview.map((row) => (
+                            <tr key={row.row} className={row.status === "update" ? "importRowSkip" : ""}>
+                              <td>{row.name}</td>
+                              <td>{row.email ?? "—"}</td>
+                              <td>{row.department ?? "—"}</td>
+                              <td>{row.jobTitle ?? "—"}</td>
+                              <td>{row.employeeNumber ?? "—"}</td>
+                              <td>
+                                <span className={`importStatusBadge importStatusBadge--${row.status}`}>
+                                  {row.status === "update" ? t("employees.import.updateLabel") : t("employees.import.createLabel")}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="importActions">
+                      <button
+                        type="button"
+                        className="btnPrimary"
+                        onClick={() => void applyEmployeeImport()}
+                        disabled={importApplying || importPreview.valid === 0}
+                      >
+                        {importApplying
+                          ? t("employees.import.importing")
+                          : `${t("employees.import.confirmBtn")} ${importPreview.valid} ${t("employees.import.employeesLabel")}`}
+                      </button>
+                      <button type="button" onClick={closeImport}>{t("common.cancel")}</button>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="importResultPanel">
+                <span className="material-symbols-outlined importResultIcon">check_circle</span>
+                <h3>{t("employees.import.doneTitle")}</h3>
+                {importResult.created > 0 && <p><strong>{importResult.created}</strong> {t("employees.import.created")}</p>}
+                {importResult.updated > 0 && <p><strong>{importResult.updated}</strong> {t("employees.import.updated")}</p>}
+                {importResult.skipped > 0 && <p>{importResult.skipped} {t("employees.import.skipped")}</p>}
+                {importResult.errors.length > 0 && (
+                  <div className="importErrorList">
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="importErrorRow">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="btnPrimary" onClick={closeImport}>{t("common.done")}</button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
