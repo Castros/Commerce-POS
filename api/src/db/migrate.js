@@ -10,6 +10,10 @@ const __dirname = path.dirname(__filename);
 const migrationsDir = path.join(__dirname, "migrations");
 
 export async function runMigrations() {
+  // PG 15+ revoked CREATE on public schema from PUBLIC role by default.
+  // DO managed Postgres users own their database and can self-grant.
+  await pool.query(`GRANT ALL ON SCHEMA public TO CURRENT_USER`);
+
   await pool.query(
     "SELECT pg_advisory_lock(hashtext('commerce_pos_schema_migrations'))"
   );
