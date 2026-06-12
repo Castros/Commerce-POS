@@ -1,0 +1,6 @@
+do_token            = "dop_v1_..."
+ssh_key_fingerprint = "xx:xx:xx:..."   # DO Dashboard → Settings → Security → SSH Keys
+environment         = "production"
+region              = "nyc1"
+droplet_size        = "s-1vcpu-2gb"
+do_project_id       = ""               # Optional: DO project ID to assign resources to

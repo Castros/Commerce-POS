@@ -5,8 +5,16 @@ dist/
 coverage/
 .env
 .env.local
+.env.prod
 npm-debug.log*
 Dockerfile.local
 *.log
 *.sql
+
+# Terraform
+terraform/*.tfvars
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
 

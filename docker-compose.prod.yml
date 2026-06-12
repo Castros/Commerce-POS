@@ -1,0 +1,39 @@
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      COMMERCE_API_TOKEN: ${COMMERCE_API_TOKEN}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      API_PORT: "4100"
+      DISABLE_DEMO_SEED: "true"
+      APP_URL: ${APP_URL}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+    ports:
+      - "4100:4100"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+    environment:
+      NODE_ENV: production
+      API_URL: http://api:4100
+    ports:
+      - "3100:3100"
+    depends_on:
+      - api
+    restart: unless-stopped

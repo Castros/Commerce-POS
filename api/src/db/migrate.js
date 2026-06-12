@@ -10,11 +10,6 @@ const __dirname = path.dirname(__filename);
 const migrationsDir = path.join(__dirname, "migrations");
 
 export async function runMigrations() {
-  // DO managed Postgres gives the app a 'db' user that has USAGE but not CREATE
-  // on the public schema. Create a schema the user owns and use it instead.
-  await pool.query(`CREATE SCHEMA IF NOT EXISTS "${process.env.DB_SCHEMA || 'app'}"`);
-  await pool.query(`SET search_path TO "${process.env.DB_SCHEMA || 'app'}", public`);
-
   await pool.query(
     "SELECT pg_advisory_lock(hashtext('commerce_pos_schema_migrations'))"
   );
