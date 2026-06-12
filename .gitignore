@@ -12,9 +12,11 @@ Dockerfile.local
 *.sql
 
 # Terraform
-terraform/*.tfvars
-terraform/.terraform/
-terraform/.terraform.lock.hcl
-terraform/terraform.tfstate
-terraform/terraform.tfstate.backup
+*.tfvars
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+crash.log
+override.tf
+override.tf.json
 
