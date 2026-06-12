@@ -29,6 +29,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+        API_URL: http://api:4100
     environment:
       NODE_ENV: production
       API_URL: http://api:4100
