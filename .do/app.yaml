@@ -16,6 +16,10 @@ region: nyc
 
 services:
   - name: api
+    github:
+      repo: Castros/Commerce-POS
+      branch: Main
+      deploy_on_push: true
     source_dir: api
     dockerfile_path: Dockerfile
     http_port: 4100
@@ -67,6 +71,10 @@ services:
         type: SECRET
 
   - name: web
+    github:
+      repo: Castros/Commerce-POS
+      branch: Main
+      deploy_on_push: true
     source_dir: web
     dockerfile_path: Dockerfile
     http_port: 3100
@@ -95,6 +103,10 @@ databases:
 jobs:
   - name: migrate
     kind: PRE_DEPLOY
+    github:
+      repo: Castros/Commerce-POS
+      branch: Main
+      deploy_on_push: true
     source_dir: api
     dockerfile_path: Dockerfile
     run_command: node src/db/migrate.js
