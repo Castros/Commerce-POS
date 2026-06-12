@@ -68,5 +68,5 @@ jobs:
             ENVEOF
 
             # Run provision (skips .env.prod creation since file exists)
-            CLOUDFLARE_TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }} \
-              bash /opt/commerce-pos/deploy/provision.sh
+            export CLOUDFLARE_TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+            bash /opt/commerce-pos/deploy/provision.sh
