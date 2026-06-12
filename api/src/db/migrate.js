@@ -10,16 +10,10 @@ const __dirname = path.dirname(__filename);
 const migrationsDir = path.join(__dirname, "migrations");
 
 export async function runMigrations() {
-  // Debug: log current user and schema privileges
-  const dbInfo = await pool.query(`
-    SELECT current_user,
-           has_schema_privilege(current_user, 'public', 'CREATE') AS can_create,
-           has_schema_privilege(current_user, 'public', 'USAGE')  AS can_use
-  `);
-  logger.info({ dbInfo: dbInfo.rows[0] }, "DB connection info");
-
-  // PG 15+ revoked CREATE on public schema from PUBLIC role by default.
-  await pool.query(`GRANT ALL ON SCHEMA public TO CURRENT_USER`);
+  // DO managed Postgres gives the app a 'db' user that has USAGE but not CREATE
+  // on the public schema. Create a schema the user owns and use it instead.
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS "${process.env.DB_SCHEMA || 'app'}"`);
+  await pool.query(`SET search_path TO "${process.env.DB_SCHEMA || 'app'}", public`);
 
   await pool.query(
     "SELECT pg_advisory_lock(hashtext('commerce_pos_schema_migrations'))"

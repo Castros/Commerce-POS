@@ -23,3 +23,12 @@ function getPoolConfig() {
 
 export const pool = new Pool(getPoolConfig());
 
+// DO managed Postgres: 'db' user has no CREATE on public schema.
+// All tables live in the 'app' schema; set search_path on every connection.
+if (process.env.NODE_ENV === "production") {
+  const schema = process.env.DB_SCHEMA || "app";
+  pool.on("connect", (client) => {
+    client.query(`SET search_path TO "${schema}", public`);
+  });
+}
+
