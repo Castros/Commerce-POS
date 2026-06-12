@@ -10,8 +10,15 @@ const __dirname = path.dirname(__filename);
 const migrationsDir = path.join(__dirname, "migrations");
 
 export async function runMigrations() {
+  // Debug: log current user and schema privileges
+  const dbInfo = await pool.query(`
+    SELECT current_user,
+           has_schema_privilege(current_user, 'public', 'CREATE') AS can_create,
+           has_schema_privilege(current_user, 'public', 'USAGE')  AS can_use
+  `);
+  logger.info({ dbInfo: dbInfo.rows[0] }, "DB connection info");
+
   // PG 15+ revoked CREATE on public schema from PUBLIC role by default.
-  // DO managed Postgres users own their database and can self-grant.
   await pool.query(`GRANT ALL ON SCHEMA public TO CURRENT_USER`);
 
   await pool.query(
