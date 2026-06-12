@@ -27,11 +27,29 @@ jobs:
             git fetch origin Main
             git reset --hard origin/Main
 
+            # Refresh .env.prod from current GitHub Secrets
+            cat > .env.prod << 'ENVEOF'
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            COMMERCE_API_TOKEN=${{ secrets.COMMERCE_API_TOKEN }}
+            CORS_ORIGINS=https://pos.jerrycastro.dev
+            APP_URL=https://pos.jerrycastro.dev
+            DISABLE_DEMO_SEED=true
+            EMAIL_FROM=Commerce POS <noreply@notify.fransolution.net>
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
+            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
+            NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            ENVEOF
+
             # Run migrations before restarting
             docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm api node src/db/migrate.js
 
-            # Rebuild and restart (--build picks up code changes)
+            # Rebuild and restart
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 
-            # Remove dangling images to reclaim disk
+            # Reclaim disk space
             docker image prune -f

@@ -1,0 +1,72 @@
+name: Provision Droplet
+
+# Run once after `terraform apply` to do first-time server setup.
+# Trigger manually from GitHub → Actions → Provision Droplet → Run workflow.
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   DROPLET_HOST             — Droplet public IP (from terraform output)
+#   DROPLET_SSH_KEY          — SSH private key content (the key whose fingerprint
+#                              was passed to Terraform as ssh_key_fingerprint)
+#   DATABASE_URL             — DO managed Postgres doadmin URL
+#   SESSION_SECRET           — openssl rand -hex 32
+#   COMMERCE_API_TOKEN       — openssl rand -hex 32
+#   RESEND_API_KEY           — from resend.com
+#   ANTHROPIC_API_KEY        — from console.anthropic.com
+#   CLOUDFLARE_TUNNEL_TOKEN  — from Zero Trust → Networks → Tunnels → Create tunnel
+#   CLOUDINARY_CLOUD_NAME    — from cloudinary.com (optional)
+#   CLOUDINARY_API_KEY       — from cloudinary.com (optional)
+#   CLOUDINARY_API_SECRET    — from cloudinary.com (optional)
+#   SENTRY_DSN               — from sentry.io (optional)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    name: First-time server setup
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Write .env.prod and run provision script
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: root
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          # Single-quoted EOF prevents remote shell from expanding $ in secret values
+          script: |
+            set -e
+
+            # Wait for user-data (Docker + cloudflared install) to finish
+            echo "Waiting for user-data..."
+            while [ ! -f /var/lib/cloud/instance/boot-finished ]; do sleep 3; done
+            while ! docker info &>/dev/null; do sleep 3; done
+            echo "Docker ready."
+
+            # Clone repo if not present
+            if [ ! -d /opt/commerce-pos ]; then
+              git clone --branch Main https://github.com/Castros/Commerce-POS.git /opt/commerce-pos
+            fi
+
+            # Write .env.prod from GitHub Secrets.
+            # Single-quoted <<'EOF' keeps the remote shell from interpreting $ in values.
+            cat > /opt/commerce-pos/.env.prod << 'ENVEOF'
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            COMMERCE_API_TOKEN=${{ secrets.COMMERCE_API_TOKEN }}
+            CORS_ORIGINS=https://pos.jerrycastro.dev
+            APP_URL=https://pos.jerrycastro.dev
+            DISABLE_DEMO_SEED=true
+            EMAIL_FROM=Commerce POS <noreply@notify.fransolution.net>
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
+            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
+            NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            ENVEOF
+
+            # Run provision (skips .env.prod creation since file exists)
+            CLOUDFLARE_TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }} \
+              bash /opt/commerce-pos/deploy/provision.sh
