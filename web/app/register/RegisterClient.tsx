@@ -284,7 +284,7 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
       });
 
       const [studentAppStudents, customers, wallets] = await Promise.all([
-        apiGet<StudentAppSearchResult[]>(`/integrations/student-app/students/search?${params}`),
+        apiGet<StudentAppSearchResult[]>(`/integrations/student-app/students/search?${params}`).catch(() => [] as StudentAppSearchResult[]),
         apiGet<Omit<DemoStudent, "wallet">[]>(`/customers?organizationId=${currentDemo.organization.id}`),
         apiGet<DemoStudent["wallet"][]>(`/wallets?organizationId=${currentDemo.organization.id}`)
       ]);
