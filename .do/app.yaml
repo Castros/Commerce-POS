@@ -21,7 +21,7 @@ services:
       branch: Main
       deploy_on_push: true
     source_dir: api
-    dockerfile_path: Dockerfile
+    dockerfile_path: api/Dockerfile
     http_port: 4100
     routes:
       - path: /v1
@@ -78,7 +78,7 @@ services:
       branch: Main
       deploy_on_push: true
     source_dir: web
-    dockerfile_path: Dockerfile
+    dockerfile_path: web/Dockerfile
     http_port: 3100
     routes:
       - path: /
@@ -112,7 +112,7 @@ jobs:
       branch: Main
       deploy_on_push: true
     source_dir: api
-    dockerfile_path: Dockerfile
+    dockerfile_path: api/Dockerfile
     run_command: node src/db/migrate.js
     instance_size_slug: apps-s-1vcpu-0.5gb
     envs:
