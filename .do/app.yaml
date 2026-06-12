@@ -10,9 +10,9 @@ region: nyc
 #   COMMERCE_API_TOKEN   - long random string for service-to-service auth
 #   SENTRY_DSN           - from sentry.io project settings (optional)
 #
-# After first deploy, add your domain in the DO App Platform console:
-#   pos-api.jerrycastro.dev  → api service
-#   pos.jerrycastro.dev      → web service
+# Routing:
+#   /v1/*  → api service (direct — Express handles /v1 prefix)
+#   /*     → web service (Next.js; proxies /api/* to api via PRIVATE_URL)
 
 services:
   - name: api
@@ -23,6 +23,8 @@ services:
     source_dir: api
     dockerfile_path: Dockerfile
     http_port: 4100
+    routes:
+      - path: /v1
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
     health_check:
@@ -78,6 +80,8 @@ services:
     source_dir: web
     dockerfile_path: Dockerfile
     http_port: 3100
+    routes:
+      - path: /
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
     health_check:
@@ -92,14 +96,6 @@ services:
       - key: NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
         scope: RUN_TIME
         type: SECRET
-
-ingress:
-  rules:
-    - component:
-        name: web
-      match:
-        path:
-          prefix: /
 
 databases:
   - name: db
