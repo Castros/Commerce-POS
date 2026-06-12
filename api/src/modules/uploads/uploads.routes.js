@@ -28,6 +28,7 @@ const ENTITY_SUBFOLDERS = {
   student:  "students",
   guardian: "guardians",
   store:    "stores",
+  product:  "products",
 };
 
 function orgFolder(organizationId, entityType) {
@@ -60,7 +61,7 @@ const upload = multer({
 uploadsRouter.get(
   "/signature",
   asyncHandler(async (req, res) => {
-    const entityType = z.enum(["staff", "student", "guardian", "store"])
+    const entityType = z.enum(["staff", "student", "guardian", "store", "product"])
       .parse(req.query.folder ?? req.query.entityType ?? "student");
 
     const actor = req.actor;

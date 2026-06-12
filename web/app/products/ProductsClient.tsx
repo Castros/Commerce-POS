@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { useRef } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
+import ProductImageUpload from "../components/ProductImageUpload";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import type { Category, DemoSchoolData, Product } from "../lib/demoTypes";
 import { formatMoney } from "../lib/format";
@@ -88,6 +90,30 @@ type CategoryForm = {
 
 const emptyCategoryForm: CategoryForm = { name: "", description: "", color: "" };
 
+type ImportPreviewRow = {
+  row: number;
+  name: string;
+  sku: string | null;
+  description: string | null;
+  priceCents: number;
+  categoryName: string | null;
+  categoryId: string | null;
+  categoryMatched: boolean | null;
+  taxable: boolean;
+  active: boolean;
+  skuConflict: boolean;
+  status: "create" | "skip";
+};
+
+type ImportPreview = {
+  total: number;
+  valid: number;
+  errors: { row: number; error: string }[];
+  preview: ImportPreviewRow[];
+};
+
+type ImportResult = { created: number; skipped: number; errors: { row: number; error: string }[] };
+
 export function ProductsClient() {
   const [demo, setDemo] = useState<DemoSchoolData | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -105,6 +131,16 @@ export function ProductsClient() {
   const [categoryForm, setCategoryForm] = useState<CategoryForm>(emptyCategoryForm);
   const [savingCategory, setSavingCategory] = useState(false);
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null);
+
+  // CSV import
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreviewing, setImportPreviewing] = useState(false);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importApplying, setImportApplying] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
 
   async function loadProducts(existingDemo = demo) {
     try {
@@ -136,6 +172,77 @@ export function ProductsClient() {
   useEffect(() => {
     void loadProducts();
   }, []);
+
+  function downloadTemplate() {
+    const header = "name,sku,description,price,category,taxable,active";
+    const example = "Lunch Special,LUNCH-01,Daily lunch combo,4.50,Cafeteria,false,true";
+    const blob = new Blob([header + "\n" + example + "\n"], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "products-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(file: File) {
+    if (!demo) return;
+    setImportFile(file);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+    setImportPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("organizationId", demo.organization.id);
+      const res = await fetch("/api/v1/products/import/preview", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: ImportPreview; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Preview failed");
+      setImportPreview(json.data!);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Preview failed");
+    } finally {
+      setImportPreviewing(false);
+    }
+  }
+
+  async function applyImport() {
+    if (!demo || !importFile) return;
+    setImportApplying(true);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", importFile);
+      fd.append("organizationId", demo.organization.id);
+      if (demo.store?.id) fd.append("storeId", demo.store.id);
+      const res = await fetch("/api/v1/products/import/apply", {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      const json = await res.json() as { data?: ImportResult; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Import failed");
+      setImportResult(json.data!);
+      void loadProducts(demo);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportApplying(false);
+    }
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportError(null);
+  }
 
   async function saveCategory() {
     if (!demo || !categoryForm.name.trim()) return;
@@ -297,9 +404,14 @@ export function ProductsClient() {
     <section className="module">
       <PageHeader eyebrow="Catalog" title="Products">
         {activeTab === "products" ? (
-          <button type="button" onClick={newProduct} className="btnPrimary">
-            Add product
-          </button>
+          <>
+            <button type="button" onClick={newProduct} className="btnPrimary">
+              Add product
+            </button>
+            <button type="button" onClick={() => setShowImport(true)}>
+              Import CSV
+            </button>
+          </>
         ) : (
           <button type="button" onClick={openNewCategory} className="btnPrimary">
             New category
@@ -508,20 +620,15 @@ export function ProductsClient() {
                   </select>
                 </label>
 
-                <div className="productImageRow">
-                  <label className="productFormLabel productFormLabel--grow">
-                    <span>Image URL <em className="productFormOptional">(optional)</em></span>
-                    <input
-                      value={form.imageUrl}
-                      onChange={(event) => setForm({ ...form, imageUrl: event.target.value })}
-                      placeholder="/product-images/lunch-combo.svg"
+                <div className="productFormLabel">
+                  <span>Product image <em className="productFormOptional">(optional)</em></span>
+                  {demo ? (
+                    <ProductImageUpload
+                      currentUrl={form.imageUrl || null}
+                      organizationId={demo.organization.id}
+                      onUploaded={(url) => setForm({ ...form, imageUrl: url })}
                     />
-                  </label>
-                  {form.imageUrl && (
-                    <div className="productImageThumbPreview">
-                      <img src={form.imageUrl} alt="Preview" />
-                    </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="productToggleRow">
@@ -689,6 +796,153 @@ export function ProductsClient() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── CSV Import overlay ── */}
+      {showImport && (
+        <div className="importOverlay">
+          <div className="importPanel">
+            <div className="importPanelHeader">
+              <strong>Import products from CSV</strong>
+              <button type="button" className="importPanelClose" onClick={closeImport}>✕</button>
+            </div>
+
+            {!importResult ? (
+              <>
+                <div className="importInstructions">
+                  <p>Upload a CSV file with your products. Required columns: <code>name</code>, <code>price</code>. Optional: <code>sku</code>, <code>description</code>, <code>category</code>, <code>taxable</code>, <code>active</code>.</p>
+                  <button type="button" className="importTemplateBtn" onClick={downloadTemplate}>
+                    <span className="material-symbols-outlined">download</span>
+                    Download template
+                  </button>
+                </div>
+
+                <div
+                  className="importDropZone"
+                  onClick={() => importFileRef.current?.click()}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files[0];
+                    if (file) void handleImportFile(file);
+                  }}
+                >
+                  <span className="material-symbols-outlined">upload_file</span>
+                  {importFile ? (
+                    <span>{importFile.name}</span>
+                  ) : (
+                    <span>Click or drag a .csv file here</span>
+                  )}
+                </div>
+
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleImportFile(file);
+                    e.target.value = "";
+                  }}
+                />
+
+                {importPreviewing && <p className="importHint">Parsing file…</p>}
+                {importError && <p className="demoError">{importError}</p>}
+
+                {importPreview && (
+                  <>
+                    <div className="importSummaryBar">
+                      <span className="importSummaryItem importSummaryItem--ok">
+                        {importPreview.preview.filter((r) => r.status === "create").length} to create
+                      </span>
+                      {importPreview.preview.filter((r) => r.status === "skip").length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--skip">
+                          {importPreview.preview.filter((r) => r.status === "skip").length} skipped (SKU exists)
+                        </span>
+                      )}
+                      {importPreview.errors.length > 0 && (
+                        <span className="importSummaryItem importSummaryItem--err">
+                          {importPreview.errors.length} errors
+                        </span>
+                      )}
+                    </div>
+
+                    {importPreview.errors.length > 0 && (
+                      <div className="importErrorList">
+                        {importPreview.errors.map((e) => (
+                          <p key={e.row} className="importErrorRow">Row {e.row}: {e.error}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="importTableWrap">
+                      <table className="importTable">
+                        <thead>
+                          <tr>
+                            <th>Name</th>
+                            <th>SKU</th>
+                            <th>Price</th>
+                            <th>Category</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.preview.map((row) => (
+                            <tr key={row.row} className={row.status === "skip" ? "importRowSkip" : ""}>
+                              <td>{row.name}</td>
+                              <td>{row.sku ?? "—"}</td>
+                              <td>${(row.priceCents / 100).toFixed(2)}</td>
+                              <td>
+                                {row.categoryName ? (
+                                  <span className={row.categoryMatched ? "importCatMatch" : "importCatMiss"}>
+                                    {row.categoryName}{!row.categoryMatched && " (not found)"}
+                                  </span>
+                                ) : "—"}
+                              </td>
+                              <td>
+                                <span className={`importStatusBadge importStatusBadge--${row.status}`}>
+                                  {row.status === "skip" ? "Skip" : "Create"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="importActions">
+                      <button
+                        type="button"
+                        className="btnPrimary"
+                        onClick={() => void applyImport()}
+                        disabled={importApplying || importPreview.preview.filter((r) => r.status === "create").length === 0}
+                      >
+                        {importApplying ? "Importing…" : `Import ${importPreview.preview.filter((r) => r.status === "create").length} products`}
+                      </button>
+                      <button type="button" onClick={closeImport}>Cancel</button>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="importResultPanel">
+                <span className="material-symbols-outlined importResultIcon">check_circle</span>
+                <h3>Import complete</h3>
+                <p><strong>{importResult.created}</strong> products created</p>
+                {importResult.skipped > 0 && <p>{importResult.skipped} skipped (SKU already exists)</p>}
+                {importResult.errors.length > 0 && (
+                  <div className="importErrorList">
+                    {importResult.errors.map((e, i) => (
+                      <p key={i} className="importErrorRow">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+                <button type="button" className="btnPrimary" onClick={closeImport}>Done</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>

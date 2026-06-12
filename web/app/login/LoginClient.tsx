@@ -112,43 +112,42 @@ function OrgSearchScreen({
   const [orgQuery, setOrgQuery] = useState("");
   const [orgResults, setOrgResults] = useState<OrgOption[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
 
-  useEffect(() => {
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
     const q = orgQuery.trim();
-    if (!q) { setOrgResults([]); return; }
-
-    const timer = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const results = await apiGet<OrgOption[]>(`/auth/orgs?q=${encodeURIComponent(q)}`);
-        setOrgResults(results);
-      } catch {
-        setOrgResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [orgQuery]);
+    if (!q) return;
+    setSearching(true);
+    setSearched(true);
+    try {
+      const results = await apiGet<OrgOption[]>(`/auth/orgs?q=${encodeURIComponent(q)}`);
+      setOrgResults(results);
+    } catch {
+      setOrgResults([]);
+    } finally {
+      setSearching(false);
+    }
+  }
 
   return (
     <>
       <h1>Select your organization</h1>
-      <p>Type your school or store name to get started.</p>
-      <div className="loginOrgSearch">
+      <p>Enter your school or store name to get started.</p>
+      <form className="loginOrgSearch" onSubmit={(e) => void handleSearch(e)}>
         <label className="fieldStack">
           <span>School or store name</span>
           <input
             autoFocus
             value={orgQuery}
-            onChange={(e) => setOrgQuery(e.target.value)}
+            onChange={(e) => { setOrgQuery(e.target.value); setSearched(false); setOrgResults([]); }}
             placeholder="Lincoln Elementary, Main Cafeteria..."
           />
         </label>
-        {searching ? (
-          <p className="loginHint">Searching…</p>
-        ) : orgQuery.trim() && orgResults.length === 0 ? (
+        <button type="submit" disabled={searching || !orgQuery.trim()}>
+          {searching ? "Searching…" : "Find Organization"}
+        </button>
+        {searched && !searching && orgResults.length === 0 ? (
           <p className="loginHint">No matching organizations found.</p>
         ) : orgResults.length > 0 ? (
           <ul className="loginOrgResults" role="listbox" aria-label="Organizations">
@@ -167,7 +166,7 @@ function OrgSearchScreen({
             ))}
           </ul>
         ) : null}
-      </div>
+      </form>
       {!cashierMode && (
         <div className="loginChips">
           <Link href="/register-login">Cashier PIN login</Link>
@@ -517,6 +516,7 @@ export function LoginClient({
   const [message, setMessage] = useState<string | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [adminOrgSearched, setAdminOrgSearched] = useState(false);
 
   // Redirect if already logged in
   useEffect(() => {
@@ -527,21 +527,20 @@ export function LoginClient({
     return () => { cancelled = true; };
   }, [nextPath, router]);
 
-  // ── Admin mode: org search
-  useEffect(() => {
+  // ── Admin mode: org search (explicit submit only)
+  async function handleAdminOrgSearch(e: React.FormEvent) {
+    e.preventDefault();
     if (cashierMode || adminOrg) return;
     const q = orgQuery.trim();
-    if (!q) { setOrgResults([]); return; }
-    const timer = setTimeout(async () => {
-      setSearchingOrgs(true);
-      try {
-        const results = await apiGet<OrgOption[]>(`/auth/orgs?q=${encodeURIComponent(q)}`);
-        setOrgResults(results);
-      } catch { setOrgResults([]); }
-      finally { setSearchingOrgs(false); }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [orgQuery, adminOrg, cashierMode]);
+    if (!q) return;
+    setSearchingOrgs(true);
+    setAdminOrgSearched(true);
+    try {
+      const results = await apiGet<OrgOption[]>(`/auth/orgs?q=${encodeURIComponent(q)}`);
+      setOrgResults(results);
+    } catch { setOrgResults([]); }
+    finally { setSearchingOrgs(false); }
+  }
 
   // ── Admin mode: load staff options when org selected
   useEffect(() => {
@@ -552,7 +551,6 @@ export function LoginClient({
       .then((opts) => {
         if (!cancelled) {
           setStaffOptions(opts);
-          setIdentifier(opts[0]?.email || opts[0]?.name || "");
         }
       })
       .catch(() => { if (!cancelled) setStaffOptions([]); })
@@ -667,20 +665,21 @@ export function LoginClient({
             </div>
           </div>
           <h1>Select your organization</h1>
-          <p>Type your school or store name to get started.</p>
-          <div className="loginOrgSearch">
+          <p>Enter your school or store name to get started.</p>
+          <form className="loginOrgSearch" onSubmit={(e) => void handleAdminOrgSearch(e)}>
             <label className="fieldStack">
               <span>School or store name</span>
               <input
                 autoFocus
                 value={orgQuery}
-                onChange={(e) => setOrgQuery(e.target.value)}
+                onChange={(e) => { setOrgQuery(e.target.value); setOrgResults([]); setAdminOrgSearched(false); }}
                 placeholder="Lincoln Elementary, Main Cafeteria..."
               />
             </label>
-            {searchingOrgs ? (
-              <p className="loginHint">Searching...</p>
-            ) : orgQuery.trim() && orgResults.length === 0 ? (
+            <button type="submit" disabled={searchingOrgs || !orgQuery.trim()}>
+              {searchingOrgs ? "Searching..." : "Find Organization"}
+            </button>
+            {adminOrgSearched && !searchingOrgs && orgResults.length === 0 ? (
               <p className="loginHint">No matching organizations found.</p>
             ) : orgResults.length > 0 ? (
               <ul className="loginOrgResults" role="listbox" aria-label="Organizations">
@@ -690,7 +689,7 @@ export function LoginClient({
                       type="button"
                       role="option"
                       aria-selected="false"
-                      onClick={() => { setAdminOrg(org); setOrgQuery(""); setOrgResults([]); }}
+                      onClick={() => { setAdminOrg(org); setOrgQuery(""); setOrgResults([]); setAdminOrgSearched(false); }}
                     >
                       <strong>{org.name}</strong>
                       <span>{org.type.replace(/_/g, " ")}</span>
@@ -699,7 +698,7 @@ export function LoginClient({
                 ))}
               </ul>
             ) : null}
-          </div>
+          </form>
           <div className="loginChips">
             <Link href="/register-login">Cashier PIN login</Link>
           </div>
@@ -738,7 +737,6 @@ export function LoginClient({
           <label className="fieldStack">
             <span>Staff name or email</span>
             <input
-              list="staff-options"
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               placeholder="Staff name or email"
@@ -759,14 +757,6 @@ export function LoginClient({
             {loggingIn ? "Signing in..." : "Open workspace"}
           </button>
         </form>
-
-        <datalist id="staff-options">
-          {staffOptions.map((staff) => (
-            <option key={staff.id} value={staff.email || staff.name || staff.id}>
-              {staff.role}
-            </option>
-          ))}
-        </datalist>
 
         <div className="loginChips">
           {selectedStaff && <span>{selectedStaff.role.replaceAll("_", " ")}</span>}
