@@ -108,7 +108,7 @@ async function loadStoreAndItems(client, body, allowedCategoryIds = null) {
 
   const productResult = await client.query(
     `
-      SELECT id, name, price_cents, currency
+      SELECT id, name, price_cents, cost_cents, currency
       FROM commerce_products
       WHERE organization_id = $1
         AND id = ANY($2::uuid[])
@@ -132,6 +132,7 @@ async function loadStoreAndItems(client, body, allowedCategoryIds = null) {
       product,
       quantity: item.quantity,
       unitPriceCents,
+      unitCostCents: product.cost_cents != null ? toInt(product.cost_cents) : null,
       lineTotalCents: unitPriceCents * item.quantity
     };
   });
@@ -334,11 +335,12 @@ async function insertPaidOrder(client, { body, items, subtotalCents, actorUserId
           product_id,
           name_snapshot,
           unit_price_cents,
+          unit_cost_cents,
           quantity,
           line_total_cents,
           currency
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'USD')
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD')
         RETURNING *
       `,
       [
@@ -347,6 +349,7 @@ async function insertPaidOrder(client, { body, items, subtotalCents, actorUserId
         item.product.id,
         item.product.name,
         item.unitPriceCents,
+        item.unitCostCents ?? null,
         item.quantity,
         item.lineTotalCents
       ]
@@ -556,7 +559,7 @@ export async function createWalletSale({
     }
     const productResult = await client.query(
       `
-        SELECT id, name, price_cents, currency
+        SELECT id, name, price_cents, cost_cents, currency
         FROM commerce_products
         WHERE organization_id = $1
           AND id = ANY($2::uuid[])
@@ -580,6 +583,7 @@ export async function createWalletSale({
         product,
         quantity: item.quantity,
         unitPriceCents,
+        unitCostCents: product.cost_cents != null ? toInt(product.cost_cents) : null,
         lineTotalCents: unitPriceCents * item.quantity
       };
     });
@@ -637,11 +641,12 @@ export async function createWalletSale({
             product_id,
             name_snapshot,
             unit_price_cents,
+            unit_cost_cents,
             quantity,
             line_total_cents,
             currency
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'USD')
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'USD')
           RETURNING *
         `,
         [
@@ -650,6 +655,7 @@ export async function createWalletSale({
           item.product.id,
           item.product.name,
           item.unitPriceCents,
+          item.unitCostCents ?? null,
           item.quantity,
           item.lineTotalCents
         ]

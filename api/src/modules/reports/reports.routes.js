@@ -101,7 +101,12 @@ reportsRouter.get(
         SELECT oi.product_id AS "productId",
                oi.name_snapshot AS "productName",
                COALESCE(SUM(oi.quantity), 0) AS "unitsSold",
-               COALESCE(SUM(oi.line_total_cents), 0) AS "revenueCents"
+               COALESCE(SUM(oi.line_total_cents), 0) AS "revenueCents",
+               CASE
+                 WHEN COUNT(oi.unit_cost_cents) = COUNT(*) THEN
+                   COALESCE(SUM(oi.unit_cost_cents * oi.quantity), 0)
+                 ELSE NULL
+               END AS "cogsCents"
         FROM commerce_order_items oi
         JOIN commerce_orders o
           ON o.organization_id = oi.organization_id
@@ -222,12 +227,23 @@ reportsRouter.get(
           walletRefundsCents: toInt(wallet.walletRefundsCents),
           walletStudentCount: toInt(wallet.walletStudentCount)
         },
-        productSales: productResult.rows.map((row) => ({
-          productId: row.productId,
-          productName: row.productName,
-          unitsSold: toInt(row.unitsSold),
-          revenueCents: toInt(row.revenueCents)
-        })),
+        productSales: productResult.rows.map((row) => {
+          const revenue = toInt(row.revenueCents);
+          const cogs = row.cogsCents !== null ? toInt(row.cogsCents) : null;
+          const grossProfit = cogs !== null ? revenue - cogs : null;
+          const marginPct = cogs !== null && revenue > 0
+            ? Math.round((grossProfit / revenue) * 1000) / 10
+            : null;
+          return {
+            productId: row.productId,
+            productName: row.productName,
+            unitsSold: toInt(row.unitsSold),
+            revenueCents: revenue,
+            cogsCents: cogs,
+            grossProfitCents: grossProfit,
+            marginPct
+          };
+        }),
         storeSales: storeResult.rows.map((row) => ({
           storeId: row.storeId,
           storeName: row.storeName,

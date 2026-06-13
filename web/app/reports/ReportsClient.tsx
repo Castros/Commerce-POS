@@ -485,12 +485,15 @@ export function ReportsClient() {
             <div className="chartPanel full">
               <h3>Product performance</h3>
               <DataTable
-                headers={["Product", "Units sold", "Revenue", "Share"]}
+                headers={["Product", "Units sold", "Revenue", "Share", "Cost (COGS)", "Gross profit", "Margin"]}
                 rows={(report?.productSales || []).map((item) => [
                   item.productName,
                   String(item.unitsSold),
                   formatMoney(item.revenueCents),
                   percentOf(item.revenueCents, grossSalesCents),
+                  item.cogsCents !== null ? formatMoney(item.cogsCents) : "—",
+                  item.grossProfitCents !== null ? formatMoney(item.grossProfitCents) : "—",
+                  item.marginPct !== null ? `${item.marginPct}%` : "—",
                 ])}
               />
             </div>

@@ -19,6 +19,7 @@ type ProductForm = {
   description: string;
   imageUrl: string;
   price: string;
+  cost: string;
   taxable: boolean;
   active: boolean;
   categoryId: string;
@@ -30,6 +31,7 @@ const emptyForm: ProductForm = {
   description: "",
   imageUrl: "",
   price: "0.00",
+  cost: "",
   taxable: false,
   active: true,
   categoryId: ""
@@ -53,6 +55,7 @@ function formFromProduct(product: Product): ProductForm {
     description: product.description || "",
     imageUrl: product.imageUrl || "",
     price: centsToPrice(product.priceCents),
+    cost: product.costCents != null ? centsToPrice(product.costCents) : "",
     taxable: product.taxable,
     active: product.active,
     categoryId: product.categoryId || ""
@@ -367,6 +370,7 @@ export function ProductsClient() {
     setError(null);
     setMessage(null);
     try {
+      const costCents = form.cost.trim() ? toCents(form.cost) : null;
       const body = {
         organizationId: demo.organization.id,
         storeId: demo.store.id,
@@ -375,6 +379,7 @@ export function ProductsClient() {
         sku: form.sku.trim() || null,
         imageUrl: form.imageUrl.trim() || null,
         priceCents,
+        costCents,
         taxable: form.taxable,
         active: form.active,
         categoryId: form.categoryId || null
@@ -582,13 +587,24 @@ export function ProductsClient() {
                 <h3 className="productFormSectionTitle">Pricing</h3>
 
                 <label className="productFormLabel">
-                  <span>Price (USD)</span>
+                  <span>Selling price (USD)</span>
                   <input
                     className="productFormPriceInput"
                     inputMode="decimal"
                     value={form.price}
                     onChange={(event) => setForm({ ...form, price: event.target.value })}
                     placeholder="0.00"
+                  />
+                </label>
+
+                <label className="productFormLabel">
+                  <span>Cost price (USD) <em className="productFormOptional">(optional — used for profit tracking)</em></span>
+                  <input
+                    className="productFormPriceInput"
+                    inputMode="decimal"
+                    value={form.cost}
+                    onChange={(event) => setForm({ ...form, cost: event.target.value })}
+                    placeholder="Leave blank if unknown"
                   />
                 </label>
 
