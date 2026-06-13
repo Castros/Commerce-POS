@@ -31,7 +31,7 @@ const ORG_COLUMNS = `
   id, name, type, external_school_id AS "externalSchoolId",
   active, currency, tax_enabled AS "taxEnabled",
   tax_rate_bps AS "taxRateBps", contact_email AS "contactEmail",
-  created_at AS "createdAt"
+  features, created_at AS "createdAt"
 `;
 
 organizationsRouter.get(
@@ -73,6 +73,40 @@ organizationsRouter.post(
       [body.name, body.type, body.externalSchoolId || null]
     );
     res.status(201).json({ data: result.rows[0] });
+  })
+);
+
+const KNOWN_FEATURES = ["ai", "guardians", "fee_assignments", "student_integration", "payroll"];
+
+organizationsRouter.put(
+  "/:id/features",
+  requirePermission("organizations:write"),
+  asyncHandler(async (req, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const actor = getActor(req);
+    if (!PLATFORM_ROLES.has(actor.role)) {
+      throw forbidden("Only platform administrators can modify feature flags");
+    }
+
+    const incoming = z.record(z.boolean()).parse(req.body);
+    const safe = Object.fromEntries(
+      Object.entries(incoming).filter(([k]) => KNOWN_FEATURES.includes(k))
+    );
+
+    const result = await pool.query(
+      `UPDATE commerce_organizations
+       SET features = features || $2::jsonb
+       WHERE id = $1
+       RETURNING ${ORG_COLUMNS}`,
+      [id, JSON.stringify(safe)]
+    );
+
+    if (!result.rows[0]) {
+      res.status(404).json({ error: "Organization not found" });
+      return;
+    }
+
+    res.json({ data: result.rows[0] });
   })
 );
 
