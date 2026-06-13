@@ -453,9 +453,10 @@ Cost scales with usage rather than being a fixed monthly commitment.
 
 ## Open Questions for Next Planning Session
 
-1. **Alert routing** — where do on-call alerts go? Slack workspace, Telegram channel, or PagerDuty?
-2. **Sentry project** — one project for API + web, or separate? Separate is cleaner for noise filtering.
-3. **Status page** — should `status.pos.jerrycastro.dev` be public (visible to school clients) or internal only?
-4. **Log retention** — 100 MB / 5 rotations is about 1–2 weeks of logs at current volume. Is that enough, or do we need to ship logs to S3?
-5. **Database backups** — are we relying on Postgres for production right now? If so, confirm backup strategy before first school goes live.
-6. **Deploy key** — current deploy runs as `root`. Before production, create a `deploy` user with limited sudo rights (only `docker compose` commands).
+1. **Alert routing** — where do on-call alerts go? Slack workspace, Telegram channel, or PagerDuty? For now we can telegram
+2. **Sentry project** — one project for API + web, or separate? Separate is cleaner for noise filtering. Seperate will be fine
+3. **Status page** — should `status.pos.jerrycastro.dev` be public (visible to school clients) or internal only? I think public, shows professionalism
+4. **Log retention** — 100 MB / 5 rotations is about 1–2 weeks of logs at current volume. Is that enough, or do we need to ship logs to S3? I'd like to ship logs to S3 buckets. Would like to keep everything to learn and build
+5. **Database backups** — are we relying on Postgres for production right now? If so, confirm backup strategy before first school goes live. We are relying on Postsgres, i dont have backup yet. 
+6. **Deploy key** — current deploy runs as `root`. Before production, create a `deploy` user with limited sudo rights (only `docker compose` commands). We can do that. 
+

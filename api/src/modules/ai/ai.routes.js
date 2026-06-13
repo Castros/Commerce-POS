@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { authorizeTenant, getActor, requirePermission } from "../../shared/auth/auth.js";
+import { requireFeature } from "../../shared/auth/featureGate.js";
 import { asyncHandler, badRequest, notFound, parseZod } from "../../shared/http/errors.js";
 import * as aiRepo from "./ai.repo.js";
 import {
@@ -15,6 +16,7 @@ import {
 } from "./ai.service.js";
 
 export const aiRouter = Router();
+aiRouter.use(requireFeature("ai"));
 
 const listQuerySchema = z.object({
   organizationId: z.string().uuid(),

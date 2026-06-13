@@ -233,6 +233,11 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
     });
   }, [demo?.products, productSearch, selectedCategory]);
 
+  const cartQuantities = useMemo(
+    () => Object.fromEntries(cart.map((line) => [line.product.id, line.quantity])),
+    [cart]
+  );
+
   function createIdempotencyKey() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
       return crypto.randomUUID();
@@ -630,9 +635,11 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
           productSearch={productSearch}
           selectedCategory={selectedCategory}
           categories={categories}
+          cartQuantities={cartQuantities}
           onSearchChange={setProductSearch}
           onCategoryChange={setSelectedCategory}
           onProductSelect={addProduct}
+          onQuantityChange={updateQuantity}
         />
 
         <aside className="cartPane">

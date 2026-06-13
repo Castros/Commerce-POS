@@ -1,3 +1,11 @@
+export type OrgFeatures = {
+  ai?: boolean;
+  guardians?: boolean;
+  fee_assignments?: boolean;
+  student_integration?: boolean;
+  payroll?: boolean;
+};
+
 export type Organization = {
   id: string;
   name: string;
@@ -8,6 +16,7 @@ export type Organization = {
   taxEnabled?: boolean;
   taxRateBps?: number;
   contactEmail?: string | null;
+  features?: OrgFeatures;
   createdAt?: string;
 };
 
