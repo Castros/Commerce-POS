@@ -211,7 +211,7 @@ authRouter.get(
       `
         SELECT u.id, u.organization_id AS "organizationId", u.email, u.name, u.role, u.active,
                u.pin_last4 AS "pinLast4", u.pin_set_at AS "pinSetAt",
-               o.name AS "organizationName"
+               o.name AS "organizationName", o.features AS "orgFeatures"
         FROM commerce_users u
         JOIN commerce_organizations o ON o.id = u.organization_id
         WHERE u.id = $1
@@ -257,7 +257,8 @@ authRouter.get(
           pinLast4: user.pinLast4,
           pinSetAt: user.pinSetAt,
           storeIds: assignments.rows.map((row) => row.storeId),
-          categoryIds: categoryPerms.rows.map((row) => row.categoryId)
+          categoryIds: categoryPerms.rows.map((row) => row.categoryId),
+          orgFeatures: user.orgFeatures ?? {}
         },
         authMode: browserSession.authMode
       }

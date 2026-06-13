@@ -6,32 +6,35 @@ import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/i18n/LanguageContext";
 
+type OrgFeatures = Record<string, boolean>;
+
 type CurrentSession = {
   user: {
     name: string | null;
     email: string | null;
     role: string;
     organizationName: string | null;
+    orgFeatures?: OrgFeatures;
   };
 };
 
 const NAV_ITEMS = [
-  { key: "nav.dashboard",     href: "/dashboard",     icon: "dashboard",       role: "All" },
-  { key: "nav.register",      href: "/register",      icon: "point_of_sale",   role: "Cashier" },
-  { key: "nav.orders",        href: "/orders",        icon: "receipt_long",    role: "Cashier" },
-  { key: "nav.inventory",     href: "/inventory",     icon: "inventory_2",     role: "Manager" },
-  { key: "nav.products",      href: "/products",      icon: "restaurant_menu", role: "Manager" },
-  { key: "nav.customers",     href: "/customers",     icon: "school",          role: "Cashier" },
-  { key: "nav.guardians",     href: "/guardians",     icon: "family_restroom", role: "Manager" },
-  { key: "nav.employees",     href: "/employees",     icon: "badge",           role: "Manager" },
-  { key: "nav.fees",          href: "/fees",           icon: "request_quote",   role: "Manager" },
-  { key: "nav.payroll",       href: "/payroll",       icon: "payments",        role: "Admin" },
-  { key: "nav.studentApp",    href: "/student-demo",  icon: "account_child",   role: "Family" },
-  { key: "nav.reports",       href: "/reports",       icon: "monitoring",      role: "Admin" },
-  { key: "nav.organizations", href: "/organizations", icon: "corporate_fare",  role: "Platform" },
-  { key: "nav.staff",         href: "/staff",         icon: "person_pin",      role: "Admin" },
-  { key: "nav.settings",      href: "/settings",      icon: "settings",        role: "Admin" }
-] as const;
+  { key: "nav.dashboard",     href: "/dashboard",     icon: "dashboard",       role: "All",      feature: null },
+  { key: "nav.register",      href: "/register",      icon: "point_of_sale",   role: "Cashier",  feature: null },
+  { key: "nav.orders",        href: "/orders",        icon: "receipt_long",    role: "Cashier",  feature: null },
+  { key: "nav.inventory",     href: "/inventory",     icon: "inventory_2",     role: "Manager",  feature: null },
+  { key: "nav.products",      href: "/products",      icon: "restaurant_menu", role: "Manager",  feature: null },
+  { key: "nav.customers",     href: "/customers",     icon: "school",          role: "Cashier",  feature: null },
+  { key: "nav.guardians",     href: "/guardians",     icon: "family_restroom", role: "Manager",  feature: "guardians" },
+  { key: "nav.employees",     href: "/employees",     icon: "badge",           role: "Manager",  feature: "payroll" },
+  { key: "nav.fees",          href: "/fees",          icon: "request_quote",   role: "Manager",  feature: "fee_assignments" },
+  { key: "nav.payroll",       href: "/payroll",       icon: "payments",        role: "Admin",    feature: "payroll" },
+  { key: "nav.studentApp",    href: "/student-demo",  icon: "account_child",   role: "Family",   feature: "student_integration" },
+  { key: "nav.reports",       href: "/reports",       icon: "monitoring",      role: "Admin",    feature: null },
+  { key: "nav.organizations", href: "/organizations", icon: "corporate_fare",  role: "Platform", feature: null },
+  { key: "nav.staff",         href: "/staff",         icon: "person_pin",      role: "Admin",    feature: null },
+  { key: "nav.settings",      href: "/settings",      icon: "settings",        role: "Admin",    feature: null }
+];
 
 const SIDEBAR_KEY = "commerce_pos_sidebar_collapsed";
 const publicPaths = new Set(["/login", "/register-login"]);
@@ -59,10 +62,16 @@ const NAV_MIN_LEVEL: Record<string, number> = {
   Platform: 4
 };
 
-function canSeeNavItem(userRole: string, navRole: string): boolean {
+const PLATFORM_ROLES = new Set(["platform_admin", "super_admin", "service"]);
+
+function canSeeNavItem(userRole: string, navRole: string, feature: string | null, orgFeatures: OrgFeatures | undefined): boolean {
   const userLevel = ROLE_LEVEL[userRole] ?? 0;
   const required  = NAV_MIN_LEVEL[navRole] ?? 99;
-  return userLevel >= required;
+  if (userLevel < required) return false;
+  if (!feature) return true;
+  // Platform admins always see everything
+  if (PLATFORM_ROLES.has(userRole)) return true;
+  return (orgFeatures?.[feature] ?? true) !== false;
 }
 
 function LangToggle() {
@@ -202,8 +211,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="navList" aria-label="Primary navigation">
-          {NAV_ITEMS.filter(({ role }) =>
-            canSeeNavItem(session?.user.role ?? "", role)
+          {NAV_ITEMS.filter(({ role, feature }) =>
+            canSeeNavItem(session?.user.role ?? "", role, feature, session?.user.orgFeatures)
           ).map(({ key, href, icon }) => (
             <Link href={href} key={href} className={pathname === href ? "active" : ""} title={t(key)}>
               <span className="navIcon">
