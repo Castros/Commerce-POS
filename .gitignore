@@ -9,7 +9,8 @@ coverage/
 npm-debug.log*
 Dockerfile.local
 *.log
-*.sql
+# *.sql — removed; migration files must be tracked
+# Add specific exclusions here if needed (e.g. dumps/*.sql)
 
 # Terraform
 *.tfvars
