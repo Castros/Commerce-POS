@@ -3,10 +3,18 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { StatusBadge } from "../components/StatusBadge";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
-import type { Organization } from "../lib/demoTypes";
+import { apiGet, apiPatch, apiPost, apiPut } from "../lib/api";
+import type { OrgFeatures, Organization } from "../lib/demoTypes";
 
 const ORG_TYPES = ["school", "restaurant", "retail_business", "nonprofit", "other"] as const;
+
+const FEATURE_DEFS = [
+  { key: "ai",                  label: "AI Features",              desc: "Closeout summaries, anomaly alerts, sales forecasts, reorder suggestions, guardian digest" },
+  { key: "guardians",           label: "Guardian Portal",          desc: "Parent-facing portal with wallet balances, purchase history, and notification preferences" },
+  { key: "fee_assignments",     label: "Fee Assignments",          desc: "Pre-assigned charges (field trips, fees) collectible at the register" },
+  { key: "student_integration", label: "Student App Integration",  desc: "Student lookup and balance sync with the linked Student app" },
+  { key: "payroll",             label: "Payroll Module",           desc: "Employee payroll management and pay run processing" },
+] as const;
 const CURRENCIES = ["USD", "EUR", "GBP", "CAD", "MXN"];
 
 type OrgForm = {
@@ -78,6 +86,10 @@ export function OrganizationsClient() {
   const [savingStaff, setSavingStaff] = useState(false);
   const [staffMessage, setStaffMessage] = useState<string | null>(null);
 
+  // Feature flags for selected org
+  const [savingFeature, setSavingFeature] = useState<string | null>(null);
+  const [featureMessage, setFeatureMessage] = useState<string | null>(null);
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -135,6 +147,7 @@ export function OrganizationsClient() {
     setEditing(null);
     setOrgStaff([]);
     setShowStaffForm(false);
+    setFeatureMessage(null);
   }
 
   function setField<K extends keyof OrgForm>(key: K, value: OrgForm[K]) {
@@ -199,6 +212,25 @@ export function OrganizationsClient() {
       setStaffMessage(err instanceof Error ? err.message : "Could not create staff member");
     } finally {
       setSavingStaff(false);
+    }
+  }
+
+  async function toggleFeature(featureKey: string, enabled: boolean) {
+    if (!editing) return;
+    setSavingFeature(featureKey);
+    setFeatureMessage(null);
+    try {
+      const updated = await apiPut<Organization>(`/organizations/${editing.id}/features`, {
+        [featureKey]: enabled
+      });
+      setEditing(updated);
+      setOrgs((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      setFeatureMessage(`${FEATURE_DEFS.find((f) => f.key === featureKey)?.label ?? featureKey} ${enabled ? "enabled" : "disabled"}`);
+      setTimeout(() => setFeatureMessage(null), 3000);
+    } catch (err) {
+      setFeatureMessage(err instanceof Error ? err.message : "Could not update feature");
+    } finally {
+      setSavingFeature(null);
     }
   }
 
@@ -347,6 +379,45 @@ export function OrganizationsClient() {
                 Cancel
               </button>
             </div>
+
+            {/* Feature flags — only shown when editing an existing org */}
+            {editing && (
+              <div className="orgStaffSection">
+                <div className="orgStaffHeader">
+                  <strong>Features</strong>
+                </div>
+
+                {featureMessage && (
+                  <p className={`buttonHelp${featureMessage.includes("Could not") ? "" : " success"}`}>
+                    {featureMessage}
+                  </p>
+                )}
+
+                <div className="featureList">
+                  {FEATURE_DEFS.map(({ key, label, desc }) => {
+                    const enabled = editing.features?.[key as keyof typeof editing.features] ?? true;
+                    const busy = savingFeature === key;
+                    return (
+                      <div key={key} className="featureRow">
+                        <div className="featureInfo">
+                          <span className="featureLabel">{label}</span>
+                          <span className="featureDesc">{desc}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className={`featureToggle${enabled ? " featureOn" : " featureOff"}`}
+                          disabled={busy}
+                          onClick={() => void toggleFeature(key, !enabled)}
+                          title={enabled ? `Disable ${label}` : `Enable ${label}`}
+                        >
+                          {busy ? "..." : enabled ? "On" : "Off"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Staff section — only shown when editing an existing org */}
             {editing && (
