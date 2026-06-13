@@ -25,6 +25,7 @@ import { storesRouter } from "./modules/stores/stores.routes.js";
 import { studentCredentialsRouter } from "./modules/studentCredentials/studentCredentials.routes.js";
 import { walletsRouter } from "./modules/wallets/wallets.routes.js";
 import { authenticateRequest } from "./shared/auth/auth.js";
+import { requireFeature } from "./shared/auth/featureGate.js";
 
 export const apiRouter = Router();
 
@@ -34,7 +35,7 @@ apiRouter.use(authenticateRequest);
 
 apiRouter.use("/organizations", organizationsRouter);
 apiRouter.use("/product-categories", productCategoriesRouter);
-apiRouter.use("/fee-assignments", feeAssignmentsRouter);
+apiRouter.use("/fee-assignments", requireFeature("fee_assignments"), feeAssignmentsRouter);
 apiRouter.use("/cash-drawers", cashDrawersRouter);
 apiRouter.use("/stores", storesRouter);
 apiRouter.use("/products/import", productImportRouter);
@@ -46,11 +47,11 @@ apiRouter.use("/orders", ordersRouter);
 apiRouter.use("/reports", reportsRouter);
 apiRouter.use("/student-credentials", studentCredentialsRouter);
 apiRouter.use("/demo", demoRouter);
-apiRouter.use("/integrations/student-app", studentAppRouter);
+apiRouter.use("/integrations/student-app", requireFeature("student_integration"), studentAppRouter);
 apiRouter.use("/inventory", inventoryRouter);
 apiRouter.use("/staff", staffRouter);
 apiRouter.use("/ai", aiRouter);
-apiRouter.use("/employees", employeesRouter);
-apiRouter.use("/payroll", payrollRouter);
-apiRouter.use("/guardians", guardiansRouter);
+apiRouter.use("/employees", requireFeature("payroll"), employeesRouter);
+apiRouter.use("/payroll", requireFeature("payroll"), payrollRouter);
+apiRouter.use("/guardians", requireFeature("guardians"), guardiansRouter);
 apiRouter.use("/uploads", uploadsRouter);
