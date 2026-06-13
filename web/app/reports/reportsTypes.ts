@@ -27,6 +27,9 @@ export type ReportSummary = {
     productName: string;
     unitsSold: number;
     revenueCents: number;
+    cogsCents: number | null;
+    grossProfitCents: number | null;
+    marginPct: number | null;
   }>;
   storeSales: Array<{
     storeId: string;

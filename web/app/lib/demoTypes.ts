@@ -38,6 +38,7 @@ export type Product = {
   sku: string | null;
   imageUrl?: string | null;
   priceCents: number | string;
+  costCents?: number | string | null;
   currency: string;
   taxable: boolean;
   active: boolean;

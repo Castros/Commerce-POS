@@ -16,6 +16,7 @@ const createProductSchema = z.object({
   sku: z.string().min(1).nullable().optional(),
   imageUrl: z.string().min(1).nullable().optional(),
   priceCents: z.number().int().min(0),
+  costCents: z.number().int().min(0).nullable().optional(),
   taxable: z.boolean().default(false)
 });
 
@@ -28,6 +29,7 @@ const updateProductSchema = z.object({
   sku: z.string().min(1).nullable().optional(),
   imageUrl: z.string().min(1).nullable().optional(),
   priceCents: z.number().int().min(0).optional(),
+  costCents: z.number().int().min(0).nullable().optional(),
   taxable: z.boolean().optional(),
   active: z.boolean().optional()
 });
@@ -75,7 +77,8 @@ productsRouter.get(
         SELECT p.id, p.organization_id AS "organizationId", p.store_id AS "storeId",
                p.category_id AS "categoryId", pc.name AS "categoryName",
                p.name, p.description, p.sku, p.image_url AS "imageUrl",
-               p.price_cents AS "priceCents", p.currency, p.taxable,
+               p.price_cents AS "priceCents", p.cost_cents AS "costCents",
+               p.currency, p.taxable,
                p.active, p.created_at AS "createdAt"
         FROM commerce_products p
         LEFT JOIN commerce_product_categories pc ON pc.id = p.category_id
@@ -110,13 +113,14 @@ productsRouter.patch(
             sku = $7,
             image_url = $8,
             price_cents = COALESCE($9, price_cents),
-            taxable = COALESCE($10, taxable),
-            active = COALESCE($11, active)
+            cost_cents = CASE WHEN $10::boolean THEN $11::integer ELSE cost_cents END,
+            taxable = COALESCE($12, taxable),
+            active = COALESCE($13, active)
         WHERE organization_id = $1
           AND id = $2
         RETURNING id, organization_id AS "organizationId", store_id AS "storeId",
                   name, description, sku, image_url AS "imageUrl", price_cents AS "priceCents",
-                  currency, taxable, active, created_at AS "createdAt"
+                  cost_cents AS "costCents", currency, taxable, active, created_at AS "createdAt"
       `,
       [
         body.organizationId,
@@ -128,6 +132,8 @@ productsRouter.patch(
         body.sku ?? null,
         body.imageUrl ?? null,
         body.priceCents ?? null,
+        "costCents" in body,
+        body.costCents ?? null,
         body.taxable ?? null,
         body.active ?? null
       ]
@@ -159,12 +165,13 @@ productsRouter.post(
           sku,
           image_url,
           price_cents,
+          cost_cents,
           taxable
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id, organization_id AS "organizationId", store_id AS "storeId",
                   name, description, sku, image_url AS "imageUrl", price_cents AS "priceCents",
-                  currency, taxable, active, created_at AS "createdAt"
+                  cost_cents AS "costCents", currency, taxable, active, created_at AS "createdAt"
       `,
       [
         body.organizationId,
@@ -175,6 +182,7 @@ productsRouter.post(
         body.sku || null,
         body.imageUrl || null,
         body.priceCents,
+        body.costCents ?? null,
         body.taxable
       ]
     );
