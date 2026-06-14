@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useOnlineStatus } from "../lib/useOnlineStatus";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/i18n/LanguageContext";
 
@@ -93,6 +94,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t, lang } = useLanguage();
+  const isOnline = useOnlineStatus();
   const [collapsed, setCollapsed] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [session, setSession] = useState<CurrentSession | null>(null);
@@ -165,7 +167,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {session?.user.organizationName && (
               <strong>{session.user.organizationName}</strong>
             )}
-            <span className="sync">{t("shell.online")}</span>
+            <span className={`sync${isOnline ? "" : " sync--offline"}`}>{isOnline ? t("shell.online") : "Offline"}</span>
           </div>
           <div className="registerSession">
             <span>{session?.user.name || session?.user.email || t("shell.cashierSession")}</span>
@@ -242,7 +244,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="topbar">
           <div className="selectors">
             <span className="topbarOrg">{session?.user.organizationName ?? t("common.organization")}</span>
-            <span className="sync">{t("shell.online")}</span>
+            <span className={`sync${isOnline ? "" : " sync--offline"}`}>{isOnline ? t("shell.online") : "Offline"}</span>
           </div>
           <label className="globalSearch">
             <span className="material-symbols-outlined" aria-hidden="true">search</span>

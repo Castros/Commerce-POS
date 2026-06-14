@@ -1,0 +1,18 @@
+{
+  "name": "Commerce POS",
+  "short_name": "Commerce POS",
+  "description": "Point-of-sale and commerce platform",
+  "start_url": "/register",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

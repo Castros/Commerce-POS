@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { AppShell } from "./components/AppShell";
 import { LanguageProvider } from "./lib/i18n/LanguageContext";
+import { OfflineQueue } from "./components/OfflineQueue";
+import { ServiceWorkerRegistrar } from "./components/ServiceWorkerRegistrar";
 import "./styles.css";
 
 export const metadata: Metadata = {
   title: "Commerce POS",
-  description: "Commerce and point-of-sale platform"
+  description: "Commerce and point-of-sale platform",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
@@ -30,7 +33,9 @@ export default function RootLayout({
       <body>
         <LanguageProvider>
           <AppShell>{children}</AppShell>
+          <OfflineQueue />
         </LanguageProvider>
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );
