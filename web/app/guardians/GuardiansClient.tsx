@@ -41,6 +41,8 @@ type GuardianCsvPreviewRow = {
   name: string;
   email: string | null;
   phone: string | null;
+  familyCode: string | null;
+  studentsLinked: number | null;
   status: "create" | "update";
 };
 
@@ -95,7 +97,7 @@ export default function GuardiansClient() {
   useEffect(() => { void loadAll(); }, []);
 
   function downloadImportTemplate() {
-    const csv = `name,email,phone\nMaria García,maria@example.com,555-1234\n`;
+    const csv = `name,email,phone,family_code\nMaria García,maria@example.com,555-1234,FAM-001\nCarlos López,carlos@example.com,,FAM-002\n`;
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -643,6 +645,8 @@ export default function GuardiansClient() {
                             <th>{t("guardians.import.colName")}</th>
                             <th>{t("guardians.import.colEmail")}</th>
                             <th>{t("guardians.import.colPhone")}</th>
+                            <th>Family code</th>
+                            <th>Students linked</th>
                             <th>{t("guardians.import.colStatus")}</th>
                           </tr>
                         </thead>
@@ -652,6 +656,16 @@ export default function GuardiansClient() {
                               <td>{row.name}</td>
                               <td>{row.email ?? "—"}</td>
                               <td>{row.phone ?? "—"}</td>
+                              <td>{row.familyCode
+                                ? <span style={{ fontFamily: "monospace" }}>{row.familyCode}</span>
+                                : "—"}
+                              </td>
+                              <td>{row.studentsLinked !== null
+                                ? <span className={row.studentsLinked === 0 ? "importStatusBadge importStatusBadge--skip" : "importStatusBadge importStatusBadge--create"}>
+                                    {row.studentsLinked === 0 ? "No match" : `${row.studentsLinked} student${row.studentsLinked !== 1 ? "s" : ""}`}
+                                  </span>
+                                : "—"}
+                              </td>
                               <td>
                                 <span className={`importStatusBadge importStatusBadge--${row.status}`}>
                                   {row.status === "update" ? t("guardians.import.updateLabel") : t("guardians.import.createLabel")}
