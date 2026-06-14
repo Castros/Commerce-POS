@@ -61,6 +61,7 @@ export default function GuardiansClient() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<Msg | null>(null);
   const [search, setSearch] = useState("");
+  const [showPortalUrl, setShowPortalUrl] = useState(false);
 
   // Panels
   const [panel, setPanel] = useState<"none" | "create" | "detail">("none");
@@ -325,11 +326,20 @@ export default function GuardiansClient() {
   const alreadyLinked = new Set(detail?.students.map((s) => s.studentId) ?? []);
   const linkableStudents = customers.filter((c) => !alreadyLinked.has(c.id));
 
+  function copyPortalLink() {
+    if (!orgId) return;
+    setShowPortalUrl((v) => !v);
+  }
+
   return (
     <section className="module">
       <PageHeader eyebrow="Manager" title="Parents & Guardians">
         <button type="button" onClick={loadAll} disabled={loading}>
           {loading ? "Loading…" : "Refresh"}
+        </button>
+        <button type="button" onClick={copyPortalLink} disabled={!orgId} title="Copy the login link to share with parents">
+          <span className="material-symbols-outlined" aria-hidden="true">link</span>
+          Copy portal link
         </button>
         <button type="button" onClick={() => setShowImport(true)}>
           {t("common.importCsv")}
@@ -342,6 +352,39 @@ export default function GuardiansClient() {
           Add guardian
         </button>
       </PageHeader>
+
+      {showPortalUrl && orgId && (
+        <div style={{ background: "var(--surface, #f9fafb)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 8, padding: "12px 16px", marginBottom: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "0.8rem", color: "var(--muted)", whiteSpace: "nowrap" }}>Parent portal link:</span>
+          <input
+            readOnly
+            value={`${window.location.origin}/parent/login?org=${orgId}`}
+            onFocus={(e) => e.target.select()}
+            style={{ flex: 1, minWidth: 260, fontFamily: "monospace", fontSize: "0.82rem", border: "1px solid var(--border, #e5e7eb)", borderRadius: 4, padding: "4px 8px", background: "#fff" }}
+          />
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              const url = `${window.location.origin}/parent/login?org=${orgId}`;
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText(url).then(() => setMsg({ text: "Link copied!", type: "ok" }));
+              } else {
+                const el = document.querySelector<HTMLInputElement>('input[value*="parent/login"]');
+                el?.select();
+                document.execCommand("copy");
+                setMsg({ text: "Link copied!", type: "ok" });
+              }
+            }}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 16 }}>content_copy</span>
+            Copy
+          </button>
+          <button type="button" className="btn" onClick={() => setShowPortalUrl(false)} title="Close">
+            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 16 }}>close</span>
+          </button>
+        </div>
+      )}
 
       {msg && (
         <p className={`demoError${msg.type === "ok" ? " success" : ""}`} role="status">

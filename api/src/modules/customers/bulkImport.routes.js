@@ -19,7 +19,7 @@ const upload = multer({
     const ok = file.mimetype === "application/zip"
       || file.mimetype === "application/x-zip-compressed"
       || file.originalname.endsWith(".zip");
-    if (!ok) return cb(new Error("Only .zip files are accepted"));
+    if (!ok) return cb(badRequest("Only .zip files are accepted"));
     cb(null, true);
   },
 });
@@ -41,7 +41,12 @@ function isImage(filename) {
 }
 
 function parseZip(buffer) {
-  const zip = new AdmZip(buffer);
+  let zip;
+  try {
+    zip = new AdmZip(buffer);
+  } catch {
+    throw badRequest("File must be a valid .zip archive");
+  }
   const entries = zip.getEntries();
 
   let csvEntry = null;
@@ -64,11 +69,16 @@ function parseZip(buffer) {
   if (!csvEntry) throw badRequest("ZIP must contain a .csv file");
 
   const csvText = csvEntry.getData().toString("utf8");
-  const rows = parse(csvText, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  });
+  let rows;
+  try {
+    rows = parse(csvText, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    });
+  } catch {
+    throw badRequest("The CSV inside the ZIP could not be parsed — make sure it is a valid UTF-8 CSV file");
+  }
 
   return { rows, imageMap };
 }
