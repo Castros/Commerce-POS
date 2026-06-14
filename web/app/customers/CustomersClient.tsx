@@ -243,14 +243,27 @@ function BulkImportModal({
 }
 
 type AddForm = {
-  name: string;
+  firstName: string;
+  middleName: string;
+  lastName1: string;
+  lastName2: string;
   externalId: string;
   email: string;
   phone: string;
   homeStoreId: string;
 };
 
-const emptyForm: AddForm = { name: "", externalId: "", email: "", phone: "", homeStoreId: "" };
+const emptyForm: AddForm = { firstName: "", middleName: "", lastName1: "", lastName2: "", externalId: "", email: "", phone: "", homeStoreId: "" };
+
+type EditForm = {
+  firstName: string;
+  middleName: string;
+  lastName1: string;
+  lastName2: string;
+  email: string;
+  phone: string;
+  familyCode: string;
+};
 
 type CustomerWithLocation = DemoStudent & { homeStoreId?: string | null };
 
@@ -269,6 +282,19 @@ export function CustomersClient() {
   const [filterStore, setFilterStore] = useState<string>("");
   const [showImport, setShowImport] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+
+  // Inline edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<EditForm>({ firstName: "", middleName: "", lastName1: "", lastName2: "", email: "", phone: "", familyCode: "" });
+  const [editDirty, setEditDirty] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Top-up state
+  const [showTopUp, setShowTopUp] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState("");
+  const [topUpSaving, setTopUpSaving] = useState(false);
+  const [topUpError, setTopUpError] = useState<string | null>(null);
 
   // CSV import state
   const importFileRef = useRef<HTMLInputElement>(null);
@@ -314,7 +340,12 @@ export function CustomersClient() {
   }, []);
 
   function downloadImportTemplate() {
-    const csv = `name,email,phone,external_id,family_code\nJohn Smith,john@example.com,,STU-001,FAM-001\nMaria Smith,,,STU-002,FAM-001\n`;
+    const csv = [
+      "first_name,middle_name,last_name_1,last_name_2,email,phone,external_id,family_code",
+      "Juan,,García,López,juan@example.com,5551234567,STU-001,FAM-001",
+      "María,Isabel,García,López,,,STU-002,FAM-001",
+      "Carlos,,Hernández,,carlos@example.com,,STU-003,FAM-002",
+    ].join("\n") + "\n";
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -384,6 +415,113 @@ export function CustomersClient() {
 
   const selected = useMemo(() => students.find((s) => s.id === selectedId) || null, [students, selectedId]);
 
+  function selectCustomer(id: string) {
+    const s = students.find((c) => c.id === id);
+    if (s) {
+      setEditForm({
+        firstName: s.firstName || "", middleName: s.middleName || "",
+        lastName1: s.lastName1 || "", lastName2: s.lastName2 || "",
+        email: s.email || "", phone: s.phone || "", familyCode: s.familyCode || ""
+      });
+      setEditDirty(false);
+      setEditError(null);
+      setIsEditing(false);
+    }
+    setSelectedId(id);
+  }
+
+  function openEdit() {
+    if (!selected) return;
+    // For legacy records without split fields, put the full name into firstName
+    // so the user can see what they're editing and redistribute it
+    const hasNoSplitName = !selected.firstName && !selected.lastName1;
+    setEditForm({
+      firstName: selected.firstName || (hasNoSplitName ? selected.name || "" : ""),
+      middleName: selected.middleName || "",
+      lastName1: selected.lastName1 || "",
+      lastName2: selected.lastName2 || "",
+      email: selected.email || "", phone: selected.phone || "", familyCode: selected.familyCode || ""
+    });
+    setEditDirty(false);
+    setEditError(null);
+    setIsEditing(true);
+  }
+
+  function cancelEdit() {
+    setIsEditing(false);
+    setEditDirty(false);
+    setEditError(null);
+  }
+
+  async function handleSaveEdit() {
+    if (!selected || !organization) return;
+    if (!editForm.firstName.trim() || !editForm.lastName1.trim()) {
+      setEditError("First name and first last name are required");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const updated = await apiPatch<CustomerWithLocation>(`/customers/${selected.id}`, {
+        organizationId: organization.id,
+        firstName: editForm.firstName.trim(),
+        middleName: editForm.middleName.trim() || null,
+        lastName1: editForm.lastName1.trim(),
+        lastName2: editForm.lastName2.trim() || null,
+        email: editForm.email.trim() || null,
+        phone: editForm.phone.trim() || null,
+        familyCode: editForm.familyCode.trim() || null,
+      });
+      setStudents((prev) => prev.map((c) => c.id === updated.id ? { ...c, ...updated } : c));
+      setIsEditing(false);
+      setEditDirty(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleTopUp() {
+    if (!selected || !organization) return;
+    const cents = Math.round(parseFloat(topUpAmount) * 100);
+    if (!cents || cents <= 0) { setTopUpError("Enter a valid amount"); return; }
+    setTopUpSaving(true);
+    setTopUpError(null);
+    try {
+      const result = await apiPost<{ wallet: { balanceCents: number } }>(
+        `/wallets/${selected.wallet.id}/topups`,
+        { organizationId: organization.id, amountCents: cents, note: "Cash top-up at counter" }
+      );
+      setStudents((prev) =>
+        prev.map((c) =>
+          c.id === selected.id
+            ? { ...c, wallet: { ...c.wallet, balanceCents: result.wallet.balanceCents } }
+            : c
+        )
+      );
+      setShowTopUp(false);
+      setTopUpAmount("");
+    } catch (err) {
+      setTopUpError(err instanceof Error ? err.message : "Top-up failed");
+    } finally {
+      setTopUpSaving(false);
+    }
+  }
+
+  async function handleToggleActive() {
+    if (!selected || !organization) return;
+    try {
+      const updated = await apiPatch<CustomerWithLocation>(`/customers/${selected.id}`, {
+        organizationId: organization.id,
+        active: !selected.active,
+      });
+      setStudents((prev) => prev.map((c) => c.id === updated.id ? { ...c, ...updated } : c));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not update status");
+    }
+  }
+
   const filtered = useMemo(() => {
     let list = students;
     if (filterStore) list = list.filter((s) => s.homeStoreId === filterStore);
@@ -405,7 +543,8 @@ export function CustomersClient() {
 
   async function handleAdd(event: React.FormEvent) {
     event.preventDefault();
-    if (!form.name.trim()) { setAddError("Name is required"); return; }
+    if (!form.firstName.trim()) { setAddError("First name is required"); return; }
+    if (!form.lastName1.trim()) { setAddError("First last name (apellido paterno) is required"); return; }
     const org = organization || (await loadCurrentOrganization());
     if (!organization) setOrganization(org);
     setSaving(true);
@@ -413,7 +552,10 @@ export function CustomersClient() {
     try {
       await apiPost("/customers", {
         organizationId: org.id,
-        name: form.name.trim(),
+        firstName: form.firstName.trim(),
+        middleName: form.middleName.trim() || null,
+        lastName1: form.lastName1.trim(),
+        lastName2: form.lastName2.trim() || null,
         externalId: form.externalId.trim() || null,
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
@@ -475,8 +617,20 @@ export function CustomersClient() {
               {addError ? <p className="pageError">{addError}</p> : null}
               <form id="addCustomerForm" onSubmit={(e) => void handleAdd(e)} className="formGrid">
                 <label className="formField">
-                  Name <span className="required">*</span>
-                  <input value={form.name} onChange={field("name")} placeholder="Full name" required />
+                  Nombre <span className="required">*</span>
+                  <input value={form.firstName} onChange={field("firstName")} placeholder="e.g. Juan" required />
+                </label>
+                <label className="formField">
+                  Segundo nombre
+                  <input value={form.middleName} onChange={field("middleName")} placeholder="e.g. Carlos" />
+                </label>
+                <label className="formField">
+                  Apellido paterno <span className="required">*</span>
+                  <input value={form.lastName1} onChange={field("lastName1")} placeholder="e.g. García" required />
+                </label>
+                <label className="formField">
+                  Apellido materno
+                  <input value={form.lastName2} onChange={field("lastName2")} placeholder="e.g. López" />
                 </label>
                 <label className="formField">
                   Matricula / Student ID
@@ -497,7 +651,7 @@ export function CustomersClient() {
                 </label>
                 <label className="formField">
                   Phone
-                  <input type="tel" value={form.phone} onChange={field("phone")} placeholder="+1 555 000 0000" />
+                  <input type="tel" value={form.phone} onChange={field("phone")} placeholder="+52 55 0000 0000" />
                 </label>
               </form>
             </div>
@@ -538,67 +692,231 @@ export function CustomersClient() {
               s.active ? "Active" : "Inactive"
             ])}
             statusIndex={4}
-            onRowClick={(index) => setSelectedId(filtered[index]?.id || "")}
+            onRowClick={(index) => selectCustomer(filtered[index]?.id || "")}
             activeRowIndex={filtered.findIndex((s) => s.id === selectedId)}
           />
         </div>
 
-        <aside className="detailPanel">
-          <span>Customer profile</span>
-          {selected && organization && (
-            <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "8px 0" }}>
-              <AvatarUpload
-                publicId={(selected as { avatarPublicId?: string }).avatarPublicId}
-                entityType="student"
-                entityId={selected.id}
-                organizationId={organization.id}
-                size={56}
-                onUploaded={(pid) => {
-                  setStudents((prev) =>
-                    prev.map((c) => c.id === selected.id ? { ...c, avatarPublicId: pid } : c)
-                  );
-                }}
-              />
-              <h3 style={{ margin: 0 }}>{selected.name || "Unnamed"}</h3>
+        <aside className="detailPanel" style={{ background: "#f8f9fa", padding: 0 }}>
+          {!selected && (
+            <div style={{ padding: 16 }}>
+              <span style={{ display: "block", fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", color: "#3e4947", textTransform: "uppercase", marginBottom: 24 }}>Customer profile</span>
+              <p style={{ color: "var(--muted)", fontSize: "0.875rem", textAlign: "center", marginTop: 40 }}>Select a customer to view their profile.</p>
             </div>
           )}
-          {!selected && <h3>Select a customer</h3>}
-          {selected ? (
-            <>
-              <StatusBadge value={selected.externalStudentId ? "Linked to Spelling App" : "Standalone"} />
-              <dl style={{ marginTop: "1rem" }}>
-                <div><dt>Wallet balance</dt><dd>{formatMoney(selected.wallet.balanceCents)}</dd></div>
-                <div><dt>Matricula</dt><dd>{selected.externalId || "-"}</dd></div>
-                <div><dt>Email</dt><dd>{selected.email || "-"}</dd></div>
-                <div><dt>Phone</dt><dd>{selected.phone || "-"}</dd></div>
-                <div>
-                  <dt>Home location</dt>
-                  <dd>
-                    <select
-                      value={selected.homeStoreId || ""}
-                      onChange={(e) => void handleLocationChange(selected.id, e.target.value || null)}
-                      style={{ fontSize: "0.9rem" }}
-                    >
-                      <option value="">— No location —</option>
-                      {stores.map((s) => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </dd>
-                </div>
-                {selected.externalStudentId && (
-                  <div>
-                    <dt>Spelling App ID</dt>
-                    <dd style={{ fontFamily: "monospace", fontSize: 12 }}>{selected.externalStudentId.slice(0, 8)}…</dd>
+
+          {selected && organization && (
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+
+              {/* Profile header card */}
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 16 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <AvatarUpload
+                    publicId={(selected as { avatarPublicId?: string }).avatarPublicId}
+                    entityType="student"
+                    entityId={selected.id}
+                    organizationId={organization.id}
+                    size={52}
+                    onUploaded={(pid) => {
+                      setStudents((prev) =>
+                        prev.map((c) => c.id === selected.id ? { ...c, avatarPublicId: pid } : c)
+                      );
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 600, color: "#191c1d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {selected.name || "Unnamed"}
+                    </h3>
+                    {!selected.firstName && !selected.lastName1 && (
+                      <p style={{ margin: "2px 0 0", fontSize: "0.72rem", color: "var(--muted)" }}>Click Edit to split name fields</p>
+                    )}
+                    <div style={{ marginTop: 6 }}>
+                      <StatusBadge value={selected.active ? (selected.externalStudentId ? "Linked" : "Active") : "Inactive"} />
+                    </div>
                   </div>
-                )}
-              </dl>
-            </>
-          ) : (
-            <p>Select a customer from the list to view their profile.</p>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  {!isEditing && (
+                    <button type="button" className="btnGhost" style={{ fontSize: "0.8rem", padding: "4px 12px" }} onClick={openEdit}>
+                      Edit
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btnGhost"
+                    style={{ fontSize: "0.8rem", padding: "4px 12px", color: selected.active ? "#dc2626" : undefined }}
+                    onClick={() => void handleToggleActive()}
+                  >
+                    {selected.active ? "Deactivate" : "Reactivate"}
+                  </button>
+                </div>
+              </div>
+
+              {isEditing ? (
+                /* Edit profile card */
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 16 }}>
+                  <span style={{ display: "block", fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", color: "#3e4947", textTransform: "uppercase", marginBottom: 12 }}>Edit Profile</span>
+                  {editError && <p className="pageError" style={{ marginBottom: 8 }}>{editError}</p>}
+                  <div className="formGrid">
+                    <label className="formField">
+                      Nombre <span className="required">*</span>
+                      <input value={editForm.firstName} onChange={(e) => { setEditForm((p) => ({ ...p, firstName: e.target.value })); setEditDirty(true); }} />
+                    </label>
+                    <label className="formField">
+                      Segundo nombre
+                      <input value={editForm.middleName} onChange={(e) => { setEditForm((p) => ({ ...p, middleName: e.target.value })); setEditDirty(true); }} placeholder="—" />
+                    </label>
+                    <label className="formField">
+                      Apellido paterno <span className="required">*</span>
+                      <input value={editForm.lastName1} onChange={(e) => { setEditForm((p) => ({ ...p, lastName1: e.target.value })); setEditDirty(true); }} />
+                    </label>
+                    <label className="formField">
+                      Apellido materno
+                      <input value={editForm.lastName2} onChange={(e) => { setEditForm((p) => ({ ...p, lastName2: e.target.value })); setEditDirty(true); }} placeholder="—" />
+                    </label>
+                    <label className="formField">
+                      Email
+                      <input type="email" value={editForm.email} onChange={(e) => { setEditForm((p) => ({ ...p, email: e.target.value })); setEditDirty(true); }} placeholder="—" />
+                    </label>
+                    <label className="formField">
+                      Teléfono
+                      <input value={editForm.phone} onChange={(e) => { setEditForm((p) => ({ ...p, phone: e.target.value })); setEditDirty(true); }} placeholder="—" />
+                    </label>
+                    <label className="formField">
+                      Family code
+                      <input value={editForm.familyCode} onChange={(e) => { setEditForm((p) => ({ ...p, familyCode: e.target.value })); setEditDirty(true); }} placeholder="e.g. FAM-001" />
+                    </label>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button type="button" className="btn" onClick={() => void handleSaveEdit()} disabled={editSaving}>
+                      {editSaving ? "Saving…" : "Save changes"}
+                    </button>
+                    <button type="button" className="btnGhost" onClick={cancelEdit}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Contact Info card */}
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 16 }}>
+                    <span style={{ display: "block", fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", color: "#3e4947", textTransform: "uppercase", marginBottom: 12 }}>Contact Info</span>
+                    <dl style={{ margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div>
+                        <dt style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6e7977", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Email</dt>
+                        <dd style={{ fontSize: "0.875rem", color: "#191c1d", margin: "2px 0 0" }}>{selected.email || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6e7977", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Teléfono</dt>
+                        <dd style={{ fontSize: "0.875rem", color: "#191c1d", margin: "2px 0 0" }}>{selected.phone || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6e7977", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Family code</dt>
+                        <dd style={{ fontSize: "0.875rem", color: "#191c1d", margin: "2px 0 0" }}>{selected.familyCode || "—"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  {/* Wallet card */}
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 16 }}>
+                    <span style={{ display: "block", fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", color: "#3e4947", textTransform: "uppercase", marginBottom: 12 }}>Wallet</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f766e", lineHeight: 1 }}>
+                          {formatMoney(selected.wallet.balanceCents)}
+                        </div>
+                        <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 4 }}>
+                          {selected.wallet.currency} · {selected.wallet.active ? "Active" : "Inactive"}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ fontSize: "0.8rem", padding: "6px 14px", whiteSpace: "nowrap" }}
+                        onClick={() => { setShowTopUp(true); setTopUpAmount(""); setTopUpError(null); }}
+                      >
+                        + Top Up
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* School card */}
+                  <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 16 }}>
+                    <span style={{ display: "block", fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", color: "#3e4947", textTransform: "uppercase", marginBottom: 12 }}>School</span>
+                    <dl style={{ margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div>
+                        <dt style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6e7977", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Matricula</dt>
+                        <dd style={{ fontSize: "0.875rem", color: "#191c1d", margin: "2px 0 0" }}>{selected.externalId || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6e7977", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Home location</dt>
+                        <dd style={{ margin: "4px 0 0" }}>
+                          <select
+                            value={selected.homeStoreId || ""}
+                            onChange={(e) => void handleLocationChange(selected.id, e.target.value || null)}
+                            style={{ fontSize: "0.875rem", width: "100%" }}
+                          >
+                            <option value="">— No location —</option>
+                            {stores.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </dd>
+                      </div>
+                      {selected.externalStudentId && (
+                        <div>
+                          <dt style={{ fontSize: "0.7rem", fontWeight: 600, color: "#6e7977", textTransform: "uppercase", letterSpacing: "0.04em", margin: 0 }}>Spelling App ID</dt>
+                          <dd style={{ fontSize: "0.75rem", color: "#191c1d", margin: "2px 0 0", fontFamily: "monospace" }}>{selected.externalStudentId.slice(0, 8)}…</dd>
+                        </div>
+                      )}
+                    </dl>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </aside>
       </div>
+
+      {/* ── Top Up modal ── */}
+      {showTopUp && selected && organization && (
+        <div className="modalOverlay" onClick={(e) => { if (e.target === e.currentTarget) { setShowTopUp(false); setTopUpAmount(""); setTopUpError(null); } }}>
+          <div className="modal">
+            <div className="modalHeader">
+              <h3>Top Up Wallet</h3>
+              <button type="button" onClick={() => { setShowTopUp(false); setTopUpAmount(""); setTopUpError(null); }}>
+                <span className="material-symbols-outlined" aria-hidden="true">close</span>
+              </button>
+            </div>
+            <div className="modalBody">
+              <p style={{ margin: "0 0 16px", color: "var(--muted)", fontSize: "0.875rem" }}>
+                Adding cash for <strong>{selected.name || "this customer"}</strong>.<br />
+                Current balance: <strong>{formatMoney(selected.wallet.balanceCents)}</strong>
+              </p>
+              {topUpError && <p className="pageError" style={{ marginBottom: 8 }}>{topUpError}</p>}
+              <label className="formField">
+                Amount ({selected.wallet.currency || "USD"})
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={topUpAmount}
+                  onChange={(e) => setTopUpAmount(e.target.value)}
+                  placeholder="0.00"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleTopUp(); }}
+                />
+              </label>
+            </div>
+            <div className="modalFooter">
+              <button type="button" className="btn" onClick={() => void handleTopUp()} disabled={topUpSaving || !topUpAmount}>
+                {topUpSaving ? "Processing…" : "Add Funds"}
+              </button>
+              <button type="button" className="btnGhost" onClick={() => { setShowTopUp(false); setTopUpAmount(""); setTopUpError(null); }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── CSV Import overlay ── */}
       {showImport && (
@@ -613,8 +931,9 @@ export function CustomersClient() {
               <>
                 <div className="importInstructions">
                   <p>
-                    {t("customers.import.instructions")} <code>name</code>.{" "}
-                    {t("customers.import.optionalColumns")} <code>email</code>, <code>phone</code>, <code>external_id</code>, <code>family_code</code>.
+                    Required: <code>first_name</code>, <code>last_name_1</code> (apellido paterno).{" "}
+                    Optional: <code>middle_name</code>, <code>last_name_2</code>, <code>email</code>, <code>phone</code>, <code>external_id</code>, <code>family_code</code>.{" "}
+                    Legacy single <code>name</code> column also accepted.
                   </p>
                   <button type="button" className="importTemplateBtn" onClick={downloadImportTemplate}>
                     <span className="material-symbols-outlined">download</span>
@@ -685,20 +1004,22 @@ export function CustomersClient() {
                       <table className="importTable">
                         <thead>
                           <tr>
-                            <th>{t("customers.import.colName")}</th>
-                            <th>{t("customers.import.colEmail")}</th>
-                            <th>{t("customers.import.colPhone")}</th>
-                            <th>{t("customers.import.colExternalId")}</th>
+                            <th>Nombre</th>
+                            <th>Ap. paterno</th>
+                            <th>Ap. materno</th>
+                            <th>Email</th>
+                            <th>Ext. ID</th>
                             <th>Family code</th>
-                            <th>{t("customers.import.colStatus")}</th>
+                            <th>Action</th>
                           </tr>
                         </thead>
                         <tbody>
                           {importPreview.preview.map((row) => (
                             <tr key={row.row} className={row.status === "update" ? "importRowSkip" : ""}>
-                              <td>{row.name}</td>
+                              <td>{(row as { firstName?: string | null }).firstName ?? row.name ?? "—"}</td>
+                              <td>{(row as { lastName1?: string | null }).lastName1 ?? "—"}</td>
+                              <td>{(row as { lastName2?: string | null }).lastName2 ?? "—"}</td>
                               <td>{row.email ?? "—"}</td>
-                              <td>{row.phone ?? "—"}</td>
                               <td>{row.externalId ?? "—"}</td>
                               <td>{row.familyCode ?? "—"}</td>
                               <td>

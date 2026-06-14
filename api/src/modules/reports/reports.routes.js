@@ -7,6 +7,55 @@ import { asyncHandler, parseZod } from "../../shared/http/errors.js";
 
 export const reportsRouter = Router();
 
+reportsRouter.get(
+  "/wallet-topups",
+  requirePermission("reports:read"),
+  asyncHandler(async (req, res) => {
+    const query = parseZod(
+      z.object({
+        organizationId: z.string().uuid(),
+        dateFrom: z.string().datetime().optional(),
+        dateTo: z.string().datetime().optional()
+      }),
+      req.query
+    );
+    authorizeTenant(req.actor, query.organizationId);
+
+    const result = await pool.query(
+      `SELECT t.id,
+              t.amount_cents       AS "amountCents",
+              t.balance_after_cents AS "balanceAfterCents",
+              t.note,
+              t.created_at         AS "createdAt",
+              c.name               AS "customerName",
+              u.name               AS "processedBy"
+       FROM commerce_wallet_transactions t
+       JOIN commerce_wallet_accounts wa ON wa.id = t.wallet_account_id
+       JOIN commerce_customers c        ON c.id  = wa.customer_id
+       LEFT JOIN commerce_users u       ON u.id  = t.created_by_user_id
+       WHERE t.organization_id = $1
+         AND t.type            = 'top_up'
+         AND ($2::timestamptz IS NULL OR t.created_at >= $2)
+         AND ($3::timestamptz IS NULL OR t.created_at <= $3)
+       ORDER BY t.created_at DESC
+       LIMIT 500`,
+      [query.organizationId, query.dateFrom || null, query.dateTo || null]
+    );
+
+    res.json({
+      data: result.rows.map((r) => ({
+        id: r.id,
+        amountCents: toInt(r.amountCents),
+        balanceAfterCents: toInt(r.balanceAfterCents),
+        note: r.note,
+        createdAt: r.createdAt,
+        customerName: r.customerName,
+        processedBy: r.processedBy || "Unknown"
+      }))
+    });
+  })
+);
+
 const summaryQuerySchema = z.object({
   organizationId: z.string().uuid(),
   storeId: z.string().uuid().optional(),

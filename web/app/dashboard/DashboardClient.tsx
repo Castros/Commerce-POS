@@ -90,6 +90,11 @@ export function DashboardClient() {
           <strong>{loading ? "—" : formatMoney(report?.wallet.walletSpendCents ?? 0)}</strong>
           <small>{loading ? "" : `${report?.wallet.walletStudentCount ?? 0} student${report?.wallet.walletStudentCount === 1 ? "" : "s"}`}</small>
         </article>
+        <article className="metricTile">
+          <span>Top-ups today</span>
+          <strong>{loading ? "—" : formatMoney(report?.wallet.walletTopUpsCents ?? 0)}</strong>
+          <small>Cash credited to wallets</small>
+        </article>
       </div>
 
       <div className="dashboardGrid">

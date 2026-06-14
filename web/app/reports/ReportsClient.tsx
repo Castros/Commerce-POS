@@ -147,6 +147,10 @@ export function ReportsClient() {
   const [digestMessage, setDigestMessage] = useState<string | null>(null);
   const [scanMessage, setScanMessage] = useState<{ type: "info" | "error"; text: string } | null>(null);
 
+  // Wallet top-up audit log
+  type TopUpRecord = { id: string; amountCents: number; balanceAfterCents: number; note: string | null; createdAt: string; customerName: string; processedBy: string };
+  const [topUps, setTopUps] = useState<TopUpRecord[]>([]);
+
   // Tab + collapse state
   const [activeTab, setActiveTab] = useState<"financial" | "ai">("financial");
   const [expanded, setExpanded]   = useState<Set<AiSection>>(new Set(["alerts", "forecast", "reorder", "summaries"]));
@@ -178,8 +182,12 @@ export function ReportsClient() {
         dateTo:   endOfSelectedDay(dateTo),
       });
       if (storeId) params.set("storeId", storeId);
-      const data = await apiGet<ReportSummary>(`/reports/summary?${params}`);
+      const [data, topUpData] = await Promise.all([
+        apiGet<ReportSummary>(`/reports/summary?${params}`),
+        apiGet<TopUpRecord[]>(`/reports/wallet-topups?${params}`)
+      ]);
       setReport(data);
+      setTopUps(topUpData);
       setLastUpdated(new Date().toISOString());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load reports");
@@ -423,6 +431,11 @@ export function ReportsClient() {
               <strong>{formatMoney(report?.wallet.walletSpendCents || 0)}</strong>
               <small>{report?.wallet.walletStudentCount || 0} student wallet{report?.wallet.walletStudentCount === 1 ? "" : "s"} used.</small>
             </div>
+            <div className="metricTile">
+              <span>Wallet top-ups</span>
+              <strong>{formatMoney(report?.wallet.walletTopUpsCents || 0)}</strong>
+              <small>{topUps.length} top-up{topUps.length !== 1 ? "s" : ""} in period.</small>
+            </div>
             <div className={`metricTile${totalDrawerVariance !== 0 ? " metricTile--warning" : ""}`}>
               <span>Drawer variance</span>
               <strong>{formatMoney(totalDrawerVariance)}</strong>
@@ -514,6 +527,28 @@ export function ReportsClient() {
                 ])}
                 statusIndex={2}
               />
+            </div>
+
+            <div className="chartPanel full">
+              <h3>Wallet top-up audit log</h3>
+              <p style={{ margin: "0 0 12px", fontSize: "0.8rem", color: "var(--muted)" }}>
+                Every cash top-up recorded against the staff member who processed it. Use this to reconcile cash collected vs. wallet credits issued.
+              </p>
+              {topUps.length === 0 ? (
+                <p className="emptyState">No top-ups in this period.</p>
+              ) : (
+                <DataTable
+                  headers={["Date & Time", "Customer", "Amount Added", "New Balance", "Processed By", "Note"]}
+                  rows={topUps.map((t) => [
+                    shortDate(t.createdAt),
+                    t.customerName,
+                    formatMoney(t.amountCents),
+                    formatMoney(t.balanceAfterCents),
+                    t.processedBy,
+                    t.note || "—",
+                  ])}
+                />
+              )}
             </div>
           </div>
         </>
