@@ -201,6 +201,7 @@ export type InventoryItem = {
   sku: string | null;
   description: string | null;
   priceCents: number | string;
+  costCents?: number | string | null;
   currency: string;
   taxable: boolean;
   quantityOnHand: number | string;
@@ -209,6 +210,16 @@ export type InventoryItem = {
   trackInventory: boolean;
   status: "in_stock" | "low" | "out" | "not_tracked";
   updatedAt: string | null;
+};
+
+export type InventoryMovement = {
+  id: string;
+  type: "receive" | "sale" | "adjustment";
+  quantityDelta: number;
+  quantityAfter: number;
+  note: string | null;
+  createdAt: string;
+  createdBy: string | null;
 };
 
 export type OrderSummary = {
