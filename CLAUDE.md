@@ -111,6 +111,9 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - **Category permissions** — staff can be restricted to specific product categories; zero rows = unrestricted
 - **Platform admin guard** — only `platform_admin`, `super_admin`, `service` roles can create new organizations
 - **Organization contact email** — `contact_email` field on each org; used as `Reply-To` on receipt emails so parents reply directly to the school
+- **Organization feature toggles** — `features` JSONB column on `commerce_organizations`; enforced by `featureGate.js` middleware; platform admins always bypass; toggled via `PATCH /v1/organizations/:id/features`
+- **Cost-of-goods (COGS) tracking** — nullable `cost_cents` on products; snapshotted as `unit_cost_cents` on order items at sale time; reports surface `cogsCents`, `grossProfitCents`, and `marginPct` per product
+- **Family code system** — `family_code` string on both `commerce_customers` (students) and `commerce_guardians`; CSV import of guardians auto-links to matching students via `commerce_guardian_students`; schools assign codes during student enrollment and include them in CSV imports (no parent action required)
 
 ### Infrastructure
 
@@ -127,7 +130,7 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - Route-level modular POS frontend with role-filtered navigation (numeric `ROLE_LEVEL` map)
 - Cashier register with live product tiles, category filters, stock badges, POS customer search, Student app search, NFC reader, cash/card/wallet checkout, receipt, signed student wallet balance, pending fees panel
 - Register UI split into POS-specific components under `web/app/register/`
-- Live Products admin route — products tab + categories tab (create/edit categories, assign products)
+- Live Products admin route — products tab + categories tab (create/edit categories, assign products); product form includes optional cost price field for COGS tracking
 - Live inventory route with manager stock receiving/adjustments
 - Orders route with receipt detail, line items, wallet impact, inventory impact, full and partial refunds
 - Payments route with cash drawer open/close and expected-vs-counted variance
@@ -135,7 +138,7 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - Organizations route — platform-level org CRUD (super_admin only for creation)
 - Staff route — create/edit staff with role, store assignments, and category access restrictions
 - Fees route (`/fees`) — create fee assignments, assign to students, cancel fees (manager+)
-- Reports route — tabbed layout: "Financial Reports" (summary metrics, payment breakdown, product sales) and "AI Insights" (Anomaly Alerts, Sales Forecast, Reorder Recommendations, Closeout Summaries, Guardian Digest trigger)
+- Reports route — tabbed layout: "Financial Reports" (summary metrics, payment breakdown, product sales with COGS/margin columns) and "AI Insights" (Anomaly Alerts, Sales Forecast, Reorder Recommendations, Closeout Summaries, Guardian Digest trigger)
 - **Guardian portal** (`/parent`) — mobile-optimized parent view with magic-link login, wallet balances, purchase history per student, notification preferences toggle
 - Student app preview route for balance and POS transaction history
 - Print CSS for 72mm receipt printing
@@ -226,6 +229,7 @@ GET   /v1/demo/school
 GET   /v1/organizations
 POST  /v1/organizations                       ← platform_admin / super_admin only
 PATCH /v1/organizations/:id                   ← includes contact_email
+PATCH /v1/organizations/:id/features         ← toggle feature flags (platform_admin / super_admin only)
 
 # Stores
 GET   /v1/stores?organizationId=...
@@ -244,6 +248,8 @@ PATCH /v1/product-categories/:id
 # Customers & Wallets
 GET   /v1/customers?organizationId=...
 POST  /v1/customers
+POST  /v1/customers/import/preview            ← CSV preview (multipart, includes family_code col)
+POST  /v1/customers/import/apply              ← CSV apply (multipart, upserts on external_id)
 GET   /v1/wallets/:id?organizationId=...
 POST  /v1/wallets/:id/top-up
 
@@ -255,6 +261,8 @@ POST  /v1/guardians/:id/invite                ← sends invite email to guardian
 GET   /v1/guardians/:id/students
 POST  /v1/guardians/:id/students              ← link student to guardian
 DELETE /v1/guardians/:id/students/:studentId
+POST  /v1/guardians/import/preview            ← CSV preview (multipart, shows studentsLinked count)
+POST  /v1/guardians/import/apply              ← CSV apply (upserts guardians + auto-links via family_code)
 
 # Fee assignments
 GET   /v1/fee-assignments?organizationId=...&customerId=...&status=...
@@ -426,6 +434,8 @@ Migrations applied in order:
 023_organization_contact_email.sql  ← contact_email column on commerce_organizations
 024_ai_cost_tracking.sql            ← cost_microdollars BIGINT on commerce_ai_records
 025_ai_new_features.sql             ← adds guardian_digest, sales_forecast to source_type check
+026_org_features.sql                ← features JSONB column on commerce_organizations
+027_cost_tracking.sql               ← cost_cents on products, unit_cost_cents on order items
 ```
 
 Do not edit already-applied migrations. Add a new numbered migration for schema changes.
@@ -502,6 +512,7 @@ cd web && npm run build
 - Store assignment enforcement is incomplete — cashier/manager endpoints don't yet reject cross-store requests.
 - No formal order void workflow or manager approval rules.
 - Dev actor fallback (`x-actor-*` headers) must be removed before first live school goes on prod — replace with a seeded test credential.
+- Production GitHub Secret `DATABASE_URL` has a typo (`ostgresql://` instead of `postgresql://`) — `pg` library tolerates it but `psql` CLI rejects it; needs to be fixed in GitHub Secrets before switching to CLI-based migrations.
 
 **Register / POS**
 - Card checkout is recorded as a payment method only; no card provider or terminal integration yet.
@@ -515,6 +526,7 @@ cd web && npm run build
 - No spending controls, allergen blocking, or product category blocking at POS.
 - No pre-ordering or meal subscriptions.
 - Low-balance alert email not yet triggered (threshold is stored, but the alert send logic is not wired).
+- Guardian invite flow sends email; guardian must click link to activate portal access. Family code linking happens at CSV import time — no retroactive re-linking after import.
 
 **AI Features**
 - Anomaly detection runs on-demand only — no scheduled cron wired yet.
@@ -569,13 +581,14 @@ Our positioning: transparent flat-rate or school-absorbs-fee model, month-to-mon
 3. Add formal void workflow and manager approval rules
 4. Remove dev actor fallback (`x-actor-*` headers) before first live school
 5. ~~Production deployment runbook~~ **Done** — `docs/deployment.md`
+6. Fix `DATABASE_URL` typo in GitHub Secrets (`ostgresql://` → `postgresql://`)
 
 **Guardian platform (compete with Paymon):**
-6. Parent wallet top-up from guardian portal (Stripe MXN / OXXO / SPEI)
-7. Low-balance alert email (threshold already stored in `notification_prefs`)
-8. Per-day spending limits and product/category blocking at POS
-9. Allergen registration per student + block at POS sale time
-10. Pre-ordering: parent reserves a meal for a future date
+7. Parent wallet top-up from guardian portal (Stripe MXN / OXXO / SPEI)
+8. Low-balance alert email (threshold already stored in `notification_prefs`)
+9. Per-day spending limits and product/category blocking at POS
+10. Allergen registration per student + block at POS sale time
+11. Pre-ordering: parent reserves a meal for a future date
 
 **Full-school payments:**
 11. Event ticketing and fee collection beyond basic fee assignments

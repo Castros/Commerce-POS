@@ -20,31 +20,52 @@ const CUSTOMER_SELECT = `
          external_parent_id  AS "externalParentId",
          external_id         AS "externalId",
          home_store_id       AS "homeStoreId",
+         family_code         AS "familyCode",
+         first_name          AS "firstName",
+         middle_name         AS "middleName",
+         last_name_1         AS "lastName1",
+         last_name_2         AS "lastName2",
          name, email, phone, active,
          avatar_public_id    AS "avatarPublicId",
          created_at          AS "createdAt"
   FROM commerce_customers
 `;
 
+function buildFullName({ firstName, middleName, lastName1, lastName2, name }) {
+  const parts = [firstName, middleName, lastName1, lastName2].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : (name || "");
+}
+
 const createCustomerSchema = z.object({
-  organizationId: z.string().uuid(),
+  organizationId:    z.string().uuid(),
   externalStudentId: z.string().uuid().nullable().optional(),
-  externalParentId: z.string().uuid().nullable().optional(),
-  externalId: z.string().nullable().optional(),
-  homeStoreId: z.string().uuid().nullable().optional(),
-  name: z.string().min(1),
-  email: z.string().email().nullable().optional(),
-  phone: z.string().nullable().optional()
-});
+  externalParentId:  z.string().uuid().nullable().optional(),
+  externalId:        z.string().nullable().optional(),
+  homeStoreId:       z.string().uuid().nullable().optional(),
+  // Structured name fields (preferred for manual entry)
+  firstName:         z.string().min(1).optional(),
+  middleName:        z.string().nullable().optional(),
+  lastName1:         z.string().min(1).optional(),
+  lastName2:         z.string().nullable().optional(),
+  // Legacy full-name field (CSV imports, integrations)
+  name:              z.string().min(1).optional(),
+  email:             z.string().email().nullable().optional(),
+  phone:             z.string().nullable().optional()
+}).refine((d) => d.name || d.firstName, { message: "Either name or firstName is required" });
 
 const updateCustomerSchema = z.object({
-  organizationId:  z.string().uuid(),
-  homeStoreId:     z.string().uuid().nullable().optional(),
-  name:            z.string().min(1).optional(),
-  email:           z.string().email().nullable().optional(),
-  phone:           z.string().nullable().optional(),
-  active:          z.boolean().optional(),
-  avatarPublicId:  z.string().nullable().optional(),
+  organizationId: z.string().uuid(),
+  homeStoreId:    z.string().uuid().nullable().optional(),
+  firstName:      z.string().min(1).optional(),
+  middleName:     z.string().nullable().optional(),
+  lastName1:      z.string().min(1).optional(),
+  lastName2:      z.string().nullable().optional(),
+  name:           z.string().min(1).optional(),
+  email:          z.string().email().nullable().optional(),
+  phone:          z.string().nullable().optional(),
+  active:         z.boolean().optional(),
+  avatarPublicId: z.string().nullable().optional(),
+  familyCode:     z.string().nullable().optional(),
 });
 
 // ── List ─────────────────────────────────────────────────────────────────────
@@ -122,14 +143,20 @@ customersRouter.post(
     const body = parseZod(createCustomerSchema, req.body);
     authorizeTenant(req.actor, body.organizationId);
 
+    const fullName = buildFullName({ firstName: body.firstName, middleName: body.middleName, lastName1: body.lastName1, lastName2: body.lastName2, name: body.name });
+
     const result = await pool.query(
       `INSERT INTO commerce_customers
          (organization_id, external_student_id, external_parent_id, external_id,
-          home_store_id, name, email, phone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          home_store_id, name, first_name, middle_name, last_name_1, last_name_2, email, phone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (organization_id, external_id)
          WHERE external_id IS NOT NULL
          DO UPDATE SET name          = EXCLUDED.name,
+                       first_name    = COALESCE(EXCLUDED.first_name, commerce_customers.first_name),
+                       middle_name   = COALESCE(EXCLUDED.middle_name, commerce_customers.middle_name),
+                       last_name_1   = COALESCE(EXCLUDED.last_name_1, commerce_customers.last_name_1),
+                       last_name_2   = COALESCE(EXCLUDED.last_name_2, commerce_customers.last_name_2),
                        email         = COALESCE(EXCLUDED.email, commerce_customers.email),
                        phone         = COALESCE(EXCLUDED.phone, commerce_customers.phone),
                        home_store_id = COALESCE(EXCLUDED.home_store_id, commerce_customers.home_store_id)
@@ -139,6 +166,9 @@ customersRouter.post(
                  external_parent_id  AS "externalParentId",
                  external_id         AS "externalId",
                  home_store_id       AS "homeStoreId",
+                 family_code         AS "familyCode",
+                 first_name AS "firstName", middle_name AS "middleName",
+                 last_name_1 AS "lastName1", last_name_2 AS "lastName2",
                  name, email, phone, active, created_at AS "createdAt"`,
       [
         body.organizationId,
@@ -146,7 +176,11 @@ customersRouter.post(
         body.externalParentId  || null,
         body.externalId        || null,
         body.homeStoreId       || null,
-        body.name,
+        fullName,
+        body.firstName  || null,
+        body.middleName || null,
+        body.lastName1  || null,
+        body.lastName2  || null,
         body.email || null,
         body.phone || null
       ]
@@ -168,12 +202,34 @@ customersRouter.patch(
     const sets = [];
     const vals = [body.organizationId, customerId];
 
-    if (body.name            !== undefined) { vals.push(body.name);            sets.push(`name = $${vals.length}`); }
+    // If any name part is provided, recompute the full name
+    const hasNameParts = body.firstName !== undefined || body.middleName !== undefined ||
+                         body.lastName1 !== undefined || body.lastName2 !== undefined;
+    if (hasNameParts || body.name !== undefined) {
+      // We need the current record to merge unchanged parts
+      const current = await pool.query(
+        `SELECT first_name, middle_name, last_name_1, last_name_2, name FROM commerce_customers WHERE id = $1 AND organization_id = $2`,
+        [customerId, body.organizationId]
+      );
+      if (current.rowCount === 0) throw notFound("Customer not found");
+      const cur = current.rows[0];
+      const fn = body.firstName  !== undefined ? body.firstName  : cur.first_name;
+      const mn = body.middleName !== undefined ? body.middleName : cur.middle_name;
+      const l1 = body.lastName1  !== undefined ? body.lastName1  : cur.last_name_1;
+      const l2 = body.lastName2  !== undefined ? body.lastName2  : cur.last_name_2;
+      const computedName = buildFullName({ firstName: fn, middleName: mn, lastName1: l1, lastName2: l2, name: body.name || cur.name });
+      vals.push(computedName); sets.push(`name = $${vals.length}`);
+      vals.push(fn || null);   sets.push(`first_name = $${vals.length}`);
+      vals.push(mn || null);   sets.push(`middle_name = $${vals.length}`);
+      vals.push(l1 || null);   sets.push(`last_name_1 = $${vals.length}`);
+      vals.push(l2 || null);   sets.push(`last_name_2 = $${vals.length}`);
+    }
     if (body.email           !== undefined) { vals.push(body.email);           sets.push(`email = $${vals.length}`); }
     if (body.phone           !== undefined) { vals.push(body.phone);           sets.push(`phone = $${vals.length}`); }
     if (body.active          !== undefined) { vals.push(body.active);          sets.push(`active = $${vals.length}`); }
     if (body.homeStoreId     !== undefined) { vals.push(body.homeStoreId);     sets.push(`home_store_id = $${vals.length}`); }
     if (body.avatarPublicId  !== undefined) { vals.push(body.avatarPublicId);  sets.push(`avatar_public_id = $${vals.length}`); }
+    if (body.familyCode      !== undefined) { vals.push(body.familyCode);      sets.push(`family_code = $${vals.length}`); }
 
     if (sets.length === 0) throw badRequest("No fields to update");
 
@@ -186,6 +242,9 @@ customersRouter.patch(
                  external_parent_id  AS "externalParentId",
                  external_id         AS "externalId",
                  home_store_id       AS "homeStoreId",
+                 family_code         AS "familyCode",
+                 first_name AS "firstName", middle_name AS "middleName",
+                 last_name_1 AS "lastName1", last_name_2 AS "lastName2",
                  avatar_public_id    AS "avatarPublicId",
                  name, email, phone, active, created_at AS "createdAt"`,
       vals
@@ -258,12 +317,18 @@ customersRouter.post(
 // ── CSV import (preview + apply, multipart) ───────────────────────────────────
 
 const csvRowSchema = z.object({
-  name:        z.string().min(1),
+  // Split name fields (preferred)
+  first_name:  z.string().optional(),
+  middle_name: z.string().optional(),
+  last_name_1: z.string().optional(),
+  last_name_2: z.string().optional(),
+  // Legacy single-name field (backward compat with SIS exports)
+  name:        z.string().optional(),
   email:       z.string().email().optional().or(z.literal("")),
   phone:       z.string().optional(),
   external_id: z.string().optional(),
   family_code: z.string().optional(),
-});
+}).refine((d) => d.name || d.first_name, { message: "Either name or first_name is required" });
 
 function parseCsvRows(buffer) {
   return parseCsv(buffer.toString("utf8"), { columns: true, skip_empty_lines: true, trim: true });
@@ -301,9 +366,10 @@ customersRouter.post(
         continue;
       }
       const r = parsed.data;
+      const fullName = buildFullName({ firstName: r.first_name, middleName: r.middle_name, lastName1: r.last_name_1, lastName2: r.last_name_2, name: r.name });
       const emailLower = (r.email || "").toLowerCase();
       const action = emailLower && existingSet.has(emailLower) ? "update" : "create";
-      preview.push({ row: i + 2, name: r.name, email: r.email || null, phone: r.phone || null, externalId: r.external_id || null, familyCode: r.family_code || null, action });
+      preview.push({ row: i + 2, firstName: r.first_name || null, middleName: r.middle_name || null, lastName1: r.last_name_1 || null, lastName2: r.last_name_2 || null, name: fullName, email: r.email || null, phone: r.phone || null, externalId: r.external_id || null, familyCode: r.family_code || null, action });
     }
 
     res.json({ data: { total: rows.length, valid: preview.length, errors, preview } });
@@ -330,21 +396,32 @@ customersRouter.post(
         const parsed = csvRowSchema.safeParse(rows[i]);
         if (!parsed.success) { errors.push({ row: i + 2, error: parsed.error.issues[0]?.message ?? "Invalid row" }); continue; }
         const r = parsed.data;
+        const fullName = buildFullName({ firstName: r.first_name, middleName: r.middle_name, lastName1: r.last_name_1, lastName2: r.last_name_2, name: r.name });
         try {
           const result = await client.query(
-            `INSERT INTO commerce_customers (organization_id, name, email, phone, external_id, family_code, customer_type)
-             VALUES ($1, $2, $3, $4, $5, $6, 'student')
+            `INSERT INTO commerce_customers
+               (organization_id, name, first_name, middle_name, last_name_1, last_name_2,
+                email, phone, external_id, family_code, customer_type)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'student')
              ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
              DO UPDATE SET name        = EXCLUDED.name,
-                           email       = COALESCE(EXCLUDED.email, commerce_customers.email),
-                           phone       = COALESCE(EXCLUDED.phone, commerce_customers.phone),
+                           first_name  = COALESCE(EXCLUDED.first_name,  commerce_customers.first_name),
+                           middle_name = COALESCE(EXCLUDED.middle_name, commerce_customers.middle_name),
+                           last_name_1 = COALESCE(EXCLUDED.last_name_1, commerce_customers.last_name_1),
+                           last_name_2 = COALESCE(EXCLUDED.last_name_2, commerce_customers.last_name_2),
+                           email       = COALESCE(EXCLUDED.email,       commerce_customers.email),
+                           phone       = COALESCE(EXCLUDED.phone,       commerce_customers.phone),
                            family_code = COALESCE(EXCLUDED.family_code, commerce_customers.family_code)
              RETURNING (xmax = 0) AS inserted`,
-            [organizationId, r.name, r.email || null, r.phone || null, r.external_id || null, r.family_code || null]
+            [
+              organizationId, fullName,
+              r.first_name || null, r.middle_name || null, r.last_name_1 || null, r.last_name_2 || null,
+              r.email || null, r.phone || null, r.external_id || null, r.family_code || null
+            ]
           );
           if (result.rows[0]?.inserted) created++; else updated++;
         } catch (err) {
-          errors.push({ row: i + 2, name: r.name, error: err.message });
+          errors.push({ row: i + 2, name: fullName, error: err.message });
         }
       }
     });

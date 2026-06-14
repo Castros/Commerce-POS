@@ -76,6 +76,99 @@ function buildReceiptHtml({ orgName, storeName, customerName, items, subtotalCen
 </html>`;
 }
 
+function buildTopUpHtml({ orgName, customerName, amountCents, balanceAfterCents }) {
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:480px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+    <div style="background:#0f766e;padding:24px 28px;">
+      <p style="margin:0;color:rgba(255,255,255,0.75);font-size:12px;text-transform:uppercase;letter-spacing:0.08em;">${orgName}</p>
+      <h1 style="margin:4px 0 0;color:#fff;font-size:22px;font-weight:700;">Wallet Funded</h1>
+    </div>
+    <div style="padding:24px 28px;">
+      ${customerName ? `<p style="margin:0 0 20px;font-size:15px;font-weight:600;color:#111827;">For: ${customerName}</p>` : ""}
+      <table style="width:100%;border-collapse:collapse;font-size:14px;color:#374151;">
+        <tbody>
+          <tr>
+            <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">Amount added</td>
+            <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;text-align:right;font-weight:700;color:#0f766e;font-size:20px;">${formatMoney(amountCents)}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#6b7280;font-size:13px;">New balance</td>
+            <td style="padding:8px 0;text-align:right;font-weight:600;color:${balanceAfterCents < 0 ? "#dc2626" : "#16a34a"};font-size:15px;">${formatMoney(balanceAfterCents)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="padding:16px 28px;background:#f9fafb;border-top:1px solid #f0f0f0;">
+      <p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">Questions? Reply to this email and we'll get back to you.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+/**
+ * Send a wallet top-up confirmation email.
+ * Routes to linked guardians with email_on_purchase enabled, falls back to customer email.
+ * Fires and forgets — never throws.
+ */
+export async function sendTopUpEmail({ organizationId, customerId, amountCents, balanceAfterCents }) {
+  try {
+    const [orgResult, customerResult] = await Promise.all([
+      pool.query(
+        `SELECT name AS "orgName", contact_email AS "contactEmail" FROM commerce_organizations WHERE id = $1`,
+        [organizationId]
+      ),
+      pool.query(
+        `SELECT name, email FROM commerce_customers WHERE id = $1 AND organization_id = $2`,
+        [customerId, organizationId]
+      )
+    ]);
+
+    const org = orgResult.rows[0];
+    const customer = customerResult.rows[0];
+    if (!customer) return;
+
+    const guardianResult = await pool.query(
+      `SELECT g.name, g.email
+       FROM commerce_guardian_students gs
+       JOIN commerce_guardians g ON g.id = gs.guardian_id
+       WHERE gs.student_id = $1 AND gs.organization_id = $2
+         AND g.active = TRUE
+         AND (g.notification_prefs->>'email_on_purchase')::boolean = TRUE`,
+      [customerId, organizationId]
+    );
+
+    const recipients = guardianResult.rows.length > 0
+      ? guardianResult.rows
+      : customer.email ? [{ name: customer.name, email: customer.email }] : [];
+
+    if (recipients.length === 0) return;
+
+    const html = buildTopUpHtml({
+      orgName: org?.orgName || "Store",
+      customerName: customer.name,
+      amountCents,
+      balanceAfterCents,
+    });
+
+    await Promise.all(
+      recipients.map((r) =>
+        sendEmail({
+          to: r.email,
+          subject: `Wallet funded — ${formatMoney(amountCents)} added`,
+          replyTo: org?.contactEmail || undefined,
+          html,
+        })
+      )
+    );
+  } catch (err) {
+    console.error("[email] sendTopUpEmail failed:", err.message);
+  }
+}
+
 /**
  * Send a purchase receipt email after a completed order.
  * Sends to all linked guardians who have email_on_purchase enabled.

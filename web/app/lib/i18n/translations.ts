@@ -16,7 +16,8 @@ const en = {
     staff: "Staff",
     settings: "Settings",
     fees: "Fees",
-    guardians: "Parents / Guardians"
+    guardians: "Parents / Guardians",
+    transactions: "Transactions"
   },
   shell: {
     orgWorkspace: "Organization workspace",
@@ -415,7 +416,8 @@ const es: typeof en = {
     staff: "Personal",
     settings: "Configuración",
     fees: "Cobros",
-    guardians: "Padres / Tutores"
+    guardians: "Padres / Tutores",
+    transactions: "Transacciones"
   },
   shell: {
     orgWorkspace: "Espacio de trabajo",

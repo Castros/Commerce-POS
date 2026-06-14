@@ -94,6 +94,11 @@ export type DemoStudent = {
   externalStudentId: string | null;
   externalParentId: string | null;
   externalId: string | null;
+  familyCode: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName1: string | null;
+  lastName2: string | null;
   name: string | null;
   email: string | null;
   phone: string | null;

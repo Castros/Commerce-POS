@@ -6,6 +6,7 @@ import { withTransaction } from "../../db/transaction.js";
 import { insertAuditEvent } from "../../shared/audit/audit.js";
 import { authorizeTenant, getActor, requirePermission } from "../../shared/auth/auth.js";
 import { asyncHandler, notFound, parseZod } from "../../shared/http/errors.js";
+import { sendTopUpEmail } from "../../shared/email/receiptEmail.js";
 
 export const walletsRouter = Router();
 
@@ -130,7 +131,7 @@ walletsRouter.post(
     const data = await withTransaction(async (client) => {
       const walletResult = await client.query(
         `
-          SELECT id, balance_cents, currency
+          SELECT id, customer_id, balance_cents, currency
           FROM commerce_wallet_accounts
           WHERE organization_id = $1
             AND id = $2
@@ -205,12 +206,24 @@ walletsRouter.post(
         wallet: {
           id: req.params.id,
           organizationId: body.organizationId,
+          customerId: wallet.customer_id,
           balanceCents: balanceAfter,
           currency: wallet.currency
         },
         transaction: transactionResult.rows[0]
       };
     });
+
+    if (data.wallet.customerId) {
+      setImmediate(() =>
+        sendTopUpEmail({
+          organizationId: body.organizationId,
+          customerId: data.wallet.customerId,
+          amountCents: body.amountCents,
+          balanceAfterCents: data.wallet.balanceCents,
+        })
+      );
+    }
 
     res.status(201).json({ data });
   })

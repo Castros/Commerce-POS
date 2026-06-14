@@ -31,6 +31,7 @@ const NAV_ITEMS = [
   { key: "nav.fees",          href: "/fees",          icon: "request_quote",   role: "Manager",  feature: "fee_assignments" },
   { key: "nav.payroll",       href: "/payroll",       icon: "payments",        role: "Admin",    feature: "payroll" },
   { key: "nav.studentApp",    href: "/student-demo",  icon: "account_child",   role: "Family",   feature: "student_integration" },
+  { key: "nav.transactions",  href: "/transactions",  icon: "swap_horiz",      role: "Manager",  feature: null },
   { key: "nav.reports",       href: "/reports",       icon: "monitoring",      role: "Admin",    feature: null },
   { key: "nav.organizations", href: "/organizations", icon: "corporate_fare",  role: "Platform", feature: null },
   { key: "nav.staff",         href: "/staff",         icon: "person_pin",      role: "Admin",    feature: null },
