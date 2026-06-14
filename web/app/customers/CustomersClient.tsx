@@ -19,6 +19,7 @@ type CsvImportPreviewRow = {
   email: string | null;
   phone: string | null;
   externalId: string | null;
+  familyCode: string | null;
   status: "create" | "update";
 };
 
@@ -313,7 +314,7 @@ export function CustomersClient() {
   }, []);
 
   function downloadImportTemplate() {
-    const csv = `name,email,phone,external_id\nJohn Smith,john@example.com,,STU-001\n`;
+    const csv = `name,email,phone,external_id,family_code\nJohn Smith,john@example.com,,STU-001,FAM-001\nMaria Smith,,,STU-002,FAM-001\n`;
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -613,7 +614,7 @@ export function CustomersClient() {
                 <div className="importInstructions">
                   <p>
                     {t("customers.import.instructions")} <code>name</code>.{" "}
-                    {t("customers.import.optionalColumns")} <code>email</code>, <code>phone</code>, <code>external_id</code>.
+                    {t("customers.import.optionalColumns")} <code>email</code>, <code>phone</code>, <code>external_id</code>, <code>family_code</code>.
                   </p>
                   <button type="button" className="importTemplateBtn" onClick={downloadImportTemplate}>
                     <span className="material-symbols-outlined">download</span>
@@ -688,6 +689,7 @@ export function CustomersClient() {
                             <th>{t("customers.import.colEmail")}</th>
                             <th>{t("customers.import.colPhone")}</th>
                             <th>{t("customers.import.colExternalId")}</th>
+                            <th>Family code</th>
                             <th>{t("customers.import.colStatus")}</th>
                           </tr>
                         </thead>
@@ -698,6 +700,7 @@ export function CustomersClient() {
                               <td>{row.email ?? "—"}</td>
                               <td>{row.phone ?? "—"}</td>
                               <td>{row.externalId ?? "—"}</td>
+                              <td>{row.familyCode ?? "—"}</td>
                               <td>
                                 <span className={`importStatusBadge importStatusBadge--${row.status}`}>
                                   {row.status === "update" ? t("customers.import.updateLabel") : t("customers.import.createLabel")}

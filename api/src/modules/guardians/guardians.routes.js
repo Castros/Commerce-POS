@@ -343,9 +343,10 @@ const guardianUpload = multer({
 });
 
 const GUARDIAN_CSV_ROW_SCHEMA = z.object({
-  name:  z.string().min(1, "name is required"),
-  email: z.string().email("email must be a valid email address"),
-  phone: z.string().optional(),
+  name:        z.string().min(1, "name is required"),
+  email:       z.string().email("email must be a valid email address"),
+  phone:       z.string().optional(),
+  family_code: z.string().optional(),
 });
 
 function parseGuardianCsvRows(buffer) {
@@ -384,6 +385,20 @@ guardiansRouter.post(
     );
     const existingEmails = new Set(existing.rows.map((r) => r.email.toLowerCase()));
 
+    // Bulk-fetch student counts per family_code for this org
+    const familyCodes = rawRows.map((r) => r.family_code).filter(Boolean);
+    let studentCountByCode = {};
+    if (familyCodes.length > 0) {
+      const counts = await pool.query(
+        `SELECT family_code, COUNT(*) AS student_count
+         FROM commerce_customers
+         WHERE organization_id = $1 AND family_code = ANY($2) AND active = TRUE
+         GROUP BY family_code`,
+        [organizationId, familyCodes]
+      );
+      counts.rows.forEach((r) => { studentCountByCode[r.family_code] = Number(r.student_count); });
+    }
+
     const preview = [];
     const errors = [];
 
@@ -398,6 +413,7 @@ guardiansRouter.post(
 
       const r = parsed.data;
       const normalizedEmail = r.email.toLowerCase().trim();
+      const familyCode = r.family_code?.trim() || null;
       const action = existingEmails.has(normalizedEmail) ? "update" : "create";
 
       preview.push({
@@ -405,6 +421,8 @@ guardiansRouter.post(
         name: r.name.trim(),
         email: normalizedEmail,
         phone: r.phone?.trim() || null,
+        familyCode,
+        studentsLinked: familyCode ? (studentCountByCode[familyCode] || 0) : null,
         action,
       });
     }
@@ -461,19 +479,39 @@ guardiansRouter.post(
 
         const r = parsed.data;
         const normalizedEmail = r.email.toLowerCase().trim();
+        const familyCode = r.family_code?.trim() || null;
         const isUpdate = existingEmails.has(normalizedEmail);
 
         try {
-          await client.query(
+          const guardianResult = await client.query(
             `INSERT INTO commerce_guardians
-               (organization_id, name, email, phone, active)
-             VALUES ($1, $2, $3, $4, TRUE)
+               (organization_id, name, email, phone, family_code, active)
+             VALUES ($1, $2, $3, $4, $5, TRUE)
              ON CONFLICT (organization_id, email) DO UPDATE
-               SET name       = EXCLUDED.name,
-                   phone      = COALESCE(EXCLUDED.phone, commerce_guardians.phone),
-                   updated_at = NOW()`,
-            [organizationId, r.name.trim(), normalizedEmail, r.phone?.trim() || null]
+               SET name        = EXCLUDED.name,
+                   phone       = COALESCE(EXCLUDED.phone, commerce_guardians.phone),
+                   family_code = COALESCE(EXCLUDED.family_code, commerce_guardians.family_code),
+                   updated_at  = NOW()
+             RETURNING id`,
+            [organizationId, r.name.trim(), normalizedEmail, r.phone?.trim() || null, familyCode]
           );
+
+          const guardianId = guardianResult.rows[0].id;
+
+          // Auto-link to all students sharing the same family_code
+          if (familyCode) {
+            await client.query(
+              `INSERT INTO commerce_guardian_students (guardian_id, student_id, organization_id)
+               SELECT $1, c.id, $2
+               FROM commerce_customers c
+               WHERE c.organization_id = $2
+                 AND c.family_code     = $3
+                 AND c.active          = TRUE
+               ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+              [guardianId, organizationId, familyCode]
+            );
+          }
+
           if (isUpdate) {
             results.updated++;
           } else {

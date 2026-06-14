@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "../components/PageHeader";
 import { apiGet, apiPost } from "../lib/api";
+import { queueOfflineSale } from "../lib/offlineDb";
+import { useOnlineStatus } from "../lib/useOnlineStatus";
 import type {
   DemoSchoolData,
   DemoStudent,
@@ -69,6 +71,7 @@ function credentialFromSerialLine(line: string) {
 }
 
 export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | null }) {
+  const isOnline = useOnlineStatus();
   const demoRef = useRef<DemoSchoolData | null>(initialDemo);
   const serialPortRef = useRef<SerialPortLike | null>(null);
   const serialReaderRef = useRef<ReadableStreamDefaultReader<BufferSource> | null>(null);
@@ -534,6 +537,34 @@ export function RegisterClient({ initialDemo }: { initialDemo: DemoSchoolData | 
 
     if (paymentMethod === "wallet" && creditExceededCents > 0) {
       setCheckoutMessage(`Credit limit exceeded by ${formatMoney(creditExceededCents)}.`);
+      return;
+    }
+
+    // Queue cash/card sales when offline; wallet requires live balance check
+    if (!isOnline && paymentMethod !== "wallet") {
+      const idempotencyKey = createIdempotencyKey();
+      const saleItems = cart.map((line) => ({ productId: line.product.id, quantity: line.quantity }));
+      const totalCents = cart.reduce((sum, line) => sum + toCents(line.product.priceCents) * line.quantity, 0);
+      try {
+        await queueOfflineSale({
+          id: idempotencyKey,
+          idempotencyKey,
+          timestamp: Date.now(),
+          organizationId: demo.organization.id,
+          storeId: demo.store.id,
+          customerId: selectedStudent?.id ?? null,
+          paymentMethod: paymentMethod as "cash" | "card",
+          registerName: demo.store.name,
+          items: saleItems,
+          totalCents,
+        });
+        setCart([]);
+        setSelectedStudentId("");
+        setStudentSearch("");
+        setCheckoutMessage(`Sale saved offline — will sync when connection returns.`);
+      } catch {
+        setCheckoutMessage("Failed to save offline. Try again.");
+      }
       return;
     }
 

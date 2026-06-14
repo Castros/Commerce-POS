@@ -262,6 +262,7 @@ const csvRowSchema = z.object({
   email:       z.string().email().optional().or(z.literal("")),
   phone:       z.string().optional(),
   external_id: z.string().optional(),
+  family_code: z.string().optional(),
 });
 
 function parseCsvRows(buffer) {
@@ -302,7 +303,7 @@ customersRouter.post(
       const r = parsed.data;
       const emailLower = (r.email || "").toLowerCase();
       const action = emailLower && existingSet.has(emailLower) ? "update" : "create";
-      preview.push({ row: i + 2, name: r.name, email: r.email || null, phone: r.phone || null, externalId: r.external_id || null, action });
+      preview.push({ row: i + 2, name: r.name, email: r.email || null, phone: r.phone || null, externalId: r.external_id || null, familyCode: r.family_code || null, action });
     }
 
     res.json({ data: { total: rows.length, valid: preview.length, errors, preview } });
@@ -331,14 +332,15 @@ customersRouter.post(
         const r = parsed.data;
         try {
           const result = await client.query(
-            `INSERT INTO commerce_customers (organization_id, name, email, phone, external_id, customer_type)
-             VALUES ($1, $2, $3, $4, $5, 'student')
+            `INSERT INTO commerce_customers (organization_id, name, email, phone, external_id, family_code, customer_type)
+             VALUES ($1, $2, $3, $4, $5, $6, 'student')
              ON CONFLICT (organization_id, external_id) WHERE external_id IS NOT NULL
-             DO UPDATE SET name  = EXCLUDED.name,
-                           email = COALESCE(EXCLUDED.email, commerce_customers.email),
-                           phone = COALESCE(EXCLUDED.phone, commerce_customers.phone)
+             DO UPDATE SET name        = EXCLUDED.name,
+                           email       = COALESCE(EXCLUDED.email, commerce_customers.email),
+                           phone       = COALESCE(EXCLUDED.phone, commerce_customers.phone),
+                           family_code = COALESCE(EXCLUDED.family_code, commerce_customers.family_code)
              RETURNING (xmax = 0) AS inserted`,
-            [organizationId, r.name, r.email || null, r.phone || null, r.external_id || null]
+            [organizationId, r.name, r.email || null, r.phone || null, r.external_id || null, r.family_code || null]
           );
           if (result.rows[0]?.inserted) created++; else updated++;
         } catch (err) {
