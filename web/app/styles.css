@@ -450,6 +450,20 @@ select {
   padding: 8px 16px;
 }
 
+.registerTopbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.registerTopbarDivider {
+  width: 1px;
+  height: 24px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
 .registerBrand {
   display: inline-flex;
   align-items: center;
@@ -577,6 +591,119 @@ select {
 .registerContent {
   min-width: 0;
   padding: 16px;
+}
+
+/* ── Store switcher ─────────────────────────────────────────────────────────── */
+
+.storeSwitcher {
+  position: relative;
+}
+
+.storeSwitcherBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.storeSwitcherBtn .material-symbols-outlined {
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.storeSwitcherBtn:hover,
+.storeSwitcherBtn.open {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.storeSwitcherBtn.open .material-symbols-outlined {
+  color: var(--primary);
+}
+
+.storeSwitcherDropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.storeSwitcherHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.storeSwitcherHeader .material-symbols-outlined {
+  font-size: 14px;
+}
+
+.storeSwitcherDivider {
+  height: 1px;
+  background: var(--line);
+}
+
+.storeSwitcherItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.storeSwitcherItem:hover {
+  background: var(--surface-soft);
+}
+
+.storeSwitcherItem.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.storeSwitcherItem.active .material-symbols-outlined {
+  font-size: 16px;
+  color: var(--primary);
+}
+
+.storeSwitcherFooter {
+  padding: 8px 12px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
 }
 
 .module {
