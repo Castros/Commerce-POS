@@ -201,6 +201,7 @@ export type InventoryItem = {
   sku: string | null;
   description: string | null;
   priceCents: number | string;
+  costCents?: number | string | null;
   currency: string;
   taxable: boolean;
   quantityOnHand: number | string;
@@ -209,6 +210,16 @@ export type InventoryItem = {
   trackInventory: boolean;
   status: "in_stock" | "low" | "out" | "not_tracked";
   updatedAt: string | null;
+};
+
+export type InventoryMovement = {
+  id: string;
+  type: "receive" | "sale" | "adjustment";
+  quantityDelta: number;
+  quantityAfter: number;
+  note: string | null;
+  createdAt: string;
+  createdBy: string | null;
 };
 
 export type OrderSummary = {
@@ -367,6 +378,56 @@ export type ReceiptExtractionDraft = {
   createdInvoiceId: string | null;
   createdAt: string;
   approvedAt: string | null;
+};
+
+export type AICorrection = {
+  id: string;
+  extractedText: string;
+  productId: string;
+  productName: string;
+  currentProductName: string | null;
+  sku: string | null;
+  useCount: number;
+  confirmedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AIDraftLine = {
+  raw_text: string;
+  product_id: string | null;
+  product_name: string;
+  sku: string | null;
+  quantity: number;
+  unit_cost_cents: number;
+  match_status: "matched" | "manual" | "skipped" | "unmatched";
+  confidence: number;
+};
+
+export type AIDraft = {
+  id: string;
+  organizationId: string;
+  storeId: string | null;
+  storeName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  status: "pending" | "approved" | "rejected";
+  source: "ai_image" | "ai_pdf";
+  fileUrl: string | null;
+  overallConfidence: number;
+  lines: AIDraftLine[];
+  rawPayload?: Record<string, unknown>;
+  extractedMeta?: {
+    supplierName: string | null;
+    invoiceNumber: string | null;
+    invoiceDate: string | null;
+    totalCents: number | null;
+    taxCents: number | null;
+    notes: string | null;
+  };
+  invoiceId: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
 };
 
 export type InventoryTransfer = {

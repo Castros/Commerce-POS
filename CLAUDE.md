@@ -42,7 +42,8 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 │   │   │   ├── fees/            ← fee assignment CRUD + register pay flow
 │   │   │   ├── guardians/       ← guardian CRUD + guardian portal auth + notification prefs
 │   │   │   ├── integrations/
-│   │   │   ├── inventory/
+│   │   │   ├── inventory/       ← inventory.routes.js (stock, suppliers, invoices, transfers)
+│   │   │   │                       inventoryAI.routes.js (AI extraction, drafts, corrections)
 │   │   │   ├── orders/
 │   │   │   ├── organizations/
 │   │   │   ├── products/
@@ -67,10 +68,13 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 │       └── fees/                ← fee assignment management (manager+)
 ├── docs/
 │   ├── ai-feature-strategy.md
+│   ├── api-endpoint-reference.md ← full curl/Postman reference for all endpoints
 │   ├── competitive-paymon.md
 │   ├── deployment.md            ← infrastructure runbook (DO, DNS, Resend email setup)
+│   ├── multi-tenant-isolation-audit-2026-06-14.md ← security audit + all fixes applied
 │   ├── sso-strategy.md
 │   ├── student-credential-model.md
+│   ├── testing-process.md       ← test strategy, coverage priorities, CI gates
 │   └── student-pos-integration-diagrams.md
 ├── .do/app.yaml                 ← DigitalOcean App Platform spec
 ├── .github/workflows/
@@ -97,6 +101,9 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - Wallet credit-line support with negative balances allowed only up to the configured limit
 - Inventory table, adjustment endpoint, low-stock API state, sale-driven stock decrement
 - Inventory receiving workflows, CSV import review, location transfers
+- **Inventory receiving v2** — supplier directory CRUD, invoice lifecycle (draft→approved), invoice line items with product snapshots, location transfers, receiving history; pg_trgm fuzzy product matching (migration 030/031)
+- **Customer name split** — `first_name`, `middle_name`, `last_name_1`, `last_name_2` columns with backfill (migrations 028/029); Spanish naming convention support
+- **AI inventory extraction** — Claude vision + PDF extraction for supplier invoices; 3-stage product matching (exact SKU → corrections table → pg_trgm fuzzy); draft review UI; approve creates invoice + updates stock; learning loop via `commerce_ai_inventory_corrections` (migration 032)
 - Cash drawer sessions with open/current/list/close endpoints and cash-sale tracking
 - Order list/detail endpoints
 - Full-order refund and partial refund endpoints
@@ -114,6 +121,8 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - **Organization feature toggles** — `features` JSONB column on `commerce_organizations`; enforced by `featureGate.js` middleware; platform admins always bypass; toggled via `PATCH /v1/organizations/:id/features`
 - **Cost-of-goods (COGS) tracking** — nullable `cost_cents` on products; snapshotted as `unit_cost_cents` on order items at sale time; reports surface `cogsCents`, `grossProfitCents`, and `marginPct` per product
 - **Family code system** — `family_code` string on both `commerce_customers` (students) and `commerce_guardians`; CSV import of guardians auto-links to matching students via `commerce_guardian_students`; schools assign codes during student enrollment and include them in CSV imports (no parent action required)
+- **Multi-tenant security hardening** — dual-layer enforcement (application `authorizeTenant()` + SQL `AND organization_id = $N`); fixed cross-org vulnerabilities in guardians, staff, inventory invoices, and AI usage; see `docs/multi-tenant-isolation-audit-2026-06-14.md`
+- **Role permission strings** — `inventory:read` and `inventory:write` added to `rolePermissions` map for `organization_admin`, `store_manager`, `cashier` (read-only), `accountant` (read-only), and `service`
 
 ### Infrastructure
 
@@ -131,7 +140,7 @@ The Spelling App owns education data. Commerce POS owns commerce data. Integrati
 - Cashier register with live product tiles, category filters, stock badges, POS customer search, Student app search, NFC reader, cash/card/wallet checkout, receipt, signed student wallet balance, pending fees panel
 - Register UI split into POS-specific components under `web/app/register/`
 - Live Products admin route — products tab + categories tab (create/edit categories, assign products); product form includes optional cost price field for COGS tracking
-- Live inventory route with manager stock receiving/adjustments
+- Live inventory route with manager stock receiving/adjustments; 4-tab Receive Stock wizard (AI Invoice Upload, Manual Entry, Transfers, AI Learning/Corrections)
 - Orders route with receipt detail, line items, wallet impact, inventory impact, full and partial refunds
 - Payments route with cash drawer open/close and expected-vs-counted variance
 - Settings route — org profile (name, type, currency, tax, contact email) + stores list
@@ -284,9 +293,47 @@ GET   /v1/cash-drawers/current?organizationId=...&storeId=...&registerName=...
 POST  /v1/cash-drawers/open
 POST  /v1/cash-drawers/:id/close              ← triggers AI closeout summary async
 
-# Inventory
+# Inventory — stock
 GET   /v1/inventory?organizationId=...&storeId=...
 POST  /v1/inventory/:productId/adjustments
+
+# Inventory — suppliers
+GET   /v1/inventory/suppliers?organizationId=...
+POST  /v1/inventory/suppliers
+PATCH /v1/inventory/suppliers/:id
+
+# Inventory — invoices (receiving)
+GET   /v1/inventory/invoices?organizationId=...&storeId=...&status=...
+POST  /v1/inventory/invoices                        ← create draft invoice
+GET   /v1/inventory/invoices/:id
+PATCH /v1/inventory/invoices/:id
+POST  /v1/inventory/invoices/:id/approve            ← approve → updates stock + writes movements
+GET   /v1/inventory/invoices/:id/lines
+
+# Inventory — transfers
+GET   /v1/inventory/transfers?organizationId=...
+POST  /v1/inventory/transfers
+GET   /v1/inventory/transfers/:id
+
+# Inventory — history
+GET   /v1/inventory/history?organizationId=...&storeId=...&productId=...
+
+# Inventory — settings
+GET   /v1/inventory/settings?organizationId=...
+PATCH /v1/inventory/settings
+
+# Inventory — AI extraction (route prefix: /inventory/ai, registered BEFORE /inventory)
+POST  /v1/inventory/ai/extract                      ← multipart: image or PDF, storeId, supplierId
+GET   /v1/inventory/ai/drafts?organizationId=...&status=...
+GET   /v1/inventory/ai/drafts/:id
+POST  /v1/inventory/ai/drafts/:id/approve           ← creates invoice, updates stock, saves corrections
+POST  /v1/inventory/ai/drafts/:id/reject
+GET   /v1/inventory/ai/corrections?organizationId=...
+POST  /v1/inventory/ai/corrections                  ← manual correction add
+DELETE /v1/inventory/ai/corrections/:id
+
+# Wallets — transactions
+GET   /v1/wallets/:id/transactions?organizationId=...
 
 # Staff
 GET   /v1/staff?organizationId=...
@@ -436,6 +483,11 @@ Migrations applied in order:
 025_ai_new_features.sql             ← adds guardian_digest, sales_forecast to source_type check
 026_org_features.sql                ← features JSONB column on commerce_organizations
 027_cost_tracking.sql               ← cost_cents on products, unit_cost_cents on order items
+028_customer_name_split.sql         ← first_name, middle_name, last_name_1, last_name_2 on commerce_customers
+029_backfill_customer_name_split.sql ← best-effort backfill from legacy `name` column (Mexican convention)
+030_inventory_receiving.sql         ← pg_trgm extension; commerce_inventory_suppliers; suppliers UNIQUE index
+031_inventory_receiving_enhancements.sql ← created_by/updated_at on invoices; ai_extracted_text/confidence/match_status on invoice lines; transfers updated_at
+032_inventory_ai.sql                ← commerce_inventory_ai_drafts; commerce_ai_inventory_corrections
 ```
 
 Do not edit already-applied migrations. Add a new numbered migration for schema changes.
@@ -479,6 +531,24 @@ web/app/register/CartPanel.tsx       ← includes pending fees panel
 web/app/register/ReceiptPreview.tsx
 web/app/register/registerUtils.ts
 web/app/register/types.ts
+```
+
+Inventory receiving wizard (`/inventory` → Receive Stock tab):
+
+```text
+web/app/inventory/receiving/ReceivingClient.tsx   ← 4-tab wizard: AI Upload | Manual | Transfers | AI Learning
+```
+
+Tabs:
+- **AI Invoice Upload** — drag-and-drop image/PDF, sends multipart to `POST /inventory/ai/extract`, shows editable review table with confidence badges (green ≥90%, amber ≥70%, red <70%), product picker for unmatched lines, approve/reject buttons
+- **Manual Entry** — traditional manual stock receiving
+- **Transfers** — inter-location inventory transfer
+- **AI Learning (N)** — view/delete/add `commerce_ai_inventory_corrections`; shows use count badges; corrections teach the AI which extracted text maps to which product
+
+Shared types for AI inventory:
+
+```text
+web/app/lib/demoTypes.ts   ← AIDraft, AIDraftLine, AICorrection types added
 ```
 
 Tenant-first rule:
@@ -531,6 +601,12 @@ cd web && npm run build
 **AI Features**
 - Anomaly detection runs on-demand only — no scheduled cron wired yet.
 - Requires `ANTHROPIC_API_KEY` in `.env`; without it endpoints return empty results gracefully.
+- AI inventory extraction requires `CLOUDINARY_*` env vars; upload silently skipped if missing.
+- AI extraction `pdf-parse` v2.4.5 must be imported as `await import("pdf-parse/lib/pdf-parse.js")` to avoid test-detection code in the library.
+
+**Multi-tenant security**
+- Store assignment enforcement is incomplete at the API layer — cashier/manager endpoints don't yet reject requests for stores they're not assigned to (tracked in Build Priority).
+- All cross-org object access vulnerabilities identified in the 2026-06-14 audit have been patched.
 
 **Full-school payments**
 - No event ticketing, marketplace module, or transport/fee billing beyond the basic fee assignments module.
@@ -539,10 +615,12 @@ cd web && npm run build
 
 ## AI Features
 
-The AI system is live. Read `docs/ai-feature-strategy.md` for product strategy and `docs/api-reference.md` for full endpoint reference.
+The AI system is live. Read `docs/ai-feature-strategy.md` for product strategy and `docs/api-endpoint-reference.md` for full endpoint reference.
 
 **Model:** `claude-haiku-4-5` (replaces retired `claude-haiku-3-5-20241022`). Cost ~$0.001 per call.
 **Cost tracking:** `cost_microdollars` stored on every `commerce_ai_records` row. Visible only to platform admins via `GET /v1/ai/usage`.
+
+### Operational AI (reports module)
 
 - **Daily Closeout Summary** — fires automatically (fire-and-forget via `setImmediate`) when `POST /v1/cash-drawers/:id/close` commits. Aggregates 6 SQL queries, hashes the facts, calls AI, stores in `commerce_ai_records`.
 - **Anomaly Alerts** — on-demand scan via `POST /v1/ai/alerts/scan`. Accepts `dateFrom`/`dateTo`. Runs 4 SQL rules; LLM only called when a rule fires. Returns "not enough data" message to UI when rules produce no hits.
@@ -551,11 +629,21 @@ The AI system is live. Read `docs/ai-feature-strategy.md` for product strategy a
 - **Guardian Spending Digest** — admin-triggered via `POST /v1/ai/guardian-digest`. Generates and emails a personalized weekly spending summary to each guardian with notifications enabled. Uses Resend.
 - **Reports UI** — `/reports` shows all five AI sections: Anomaly Alerts, Forecast, Reorder, Guardian Digest trigger, and Closeout Summaries.
 
+### AI Inventory Extraction (inventory/ai module)
+
+- **Invoice Extraction** — `POST /v1/inventory/ai/extract` accepts multipart image (JPEG/PNG — Claude vision base64) or PDF (pdf-parse text extraction). Uploads original file to Cloudinary (`orgs/{orgId}/invoices/`, `resource_type: raw` for PDFs). Calls Claude to extract supplier name, invoice number, date, and line items. Each line goes through 3-stage product matching: exact SKU → org corrections table → pg_trgm fuzzy similarity. Returns a draft.
+- **Draft Review** — manager reviews extracted lines in UI, edits quantities/costs, selects correct product for unmatched lines, can skip lines. Approve blocked until all lines matched or skipped.
+- **Draft Approval** — `POST /v1/inventory/ai/drafts/:id/approve` runs inside `withTransaction`: creates invoice + lines, locks inventory rows `FOR UPDATE`, increments stock quantities, optionally updates product `cost_cents` from invoice unit cost, saves corrections via UPSERT.
+- **Learning Loop** — each approved match upserts a row in `commerce_ai_inventory_corrections` (org-scoped). Future extractions load corrections first and inject them as few-shot hints in Claude's system prompt. `use_count` increments on each reuse.
+- **Corrections Management** — `GET/POST/DELETE /v1/inventory/ai/corrections` for manager CRUD. "AI Learning" tab in UI shows all corrections with use counts; high-use corrections badge green.
+
 Architecture rules:
-- AI outputs live only in `commerce_ai_records`. AI never writes to financial tables.
-- Aggregation is always deterministic SQL first. AI summarizes pre-computed facts.
-- Every AI record is scoped by `organization_id`. Never query across tenants.
-- Status lifecycle: `pending → draft → reviewed` or `dismissed`.
+- AI outputs live only in `commerce_ai_records` (operational AI) or `commerce_inventory_ai_drafts` (extraction AI). AI never writes directly to financial or inventory tables.
+- Aggregation is always deterministic SQL first. AI summarizes or extracts; SQL computes totals and updates stock.
+- Every AI record and draft is scoped by `organization_id`. Never query across tenants.
+- Operational AI status lifecycle: `pending → draft → reviewed` or `dismissed`.
+- Extraction draft lifecycle: `pending → approved` or `rejected`.
+- Cloudinary env vars required for AI extraction: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`.
 
 ---
 
@@ -577,11 +665,17 @@ Our positioning: transparent flat-rate or school-absorbs-fee model, month-to-mon
 
 **Immediate (operator hardening):**
 1. ~~Staff creation/management UI~~ **Done**
-2. Enforce store assignments for cashier/store-manager at every endpoint
-3. Add formal void workflow and manager approval rules
-4. Remove dev actor fallback (`x-actor-*` headers) before first live school
-5. ~~Production deployment runbook~~ **Done** — `docs/deployment.md`
-6. Fix `DATABASE_URL` typo in GitHub Secrets (`ostgresql://` → `postgresql://`)
+2. ~~Multi-tenant security audit + fixes~~ **Done** — `docs/multi-tenant-isolation-audit-2026-06-14.md`
+3. Enforce store assignments for cashier/store-manager at every endpoint
+4. Add formal void workflow and manager approval rules
+5. Remove dev actor fallback (`x-actor-*` headers) before first live school
+6. ~~Production deployment runbook~~ **Done** — `docs/deployment.md`
+7. Fix `DATABASE_URL` typo in GitHub Secrets (`ostgresql://` → `postgresql://`)
+
+**AI Inventory:**
+8. ~~AI invoice extraction (image + PDF) with draft review wizard~~ **Done**
+9. ~~Learning loop corrections table + UI~~ **Done**
+10. Wire AI inventory extraction feature flag (`ai_inventory_extraction`) via `featureGate.js`
 
 **Guardian platform (compete with Paymon):**
 7. Parent wallet top-up from guardian portal (Stripe MXN / OXXO / SPEI)

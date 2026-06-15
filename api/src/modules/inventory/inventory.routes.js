@@ -5,7 +5,7 @@ import multer from "multer";
 
 import { pool } from "../../db/client.js";
 import { withTransaction } from "../../db/transaction.js";
-import { authorizeTenant, authorizeStore, requirePermission } from "../../shared/auth/auth.js";
+import { authorizeTenant, authorizeStore, requirePermission, getActor } from "../../shared/auth/auth.js";
 import { asyncHandler, badRequest, notFound, parseZod } from "../../shared/http/errors.js";
 
 export const inventoryRouter = Router();
@@ -174,6 +174,124 @@ inventoryRouter.post(
     } finally {
       client.release();
     }
+  })
+);
+
+// ── Movement history for a product ───────────────────────────────────────────
+
+inventoryRouter.get(
+  "/:productId/history",
+  asyncHandler(async (req, res) => {
+    const productId = z.string().uuid().parse(req.params.productId);
+    const query = parseZod(
+      z.object({
+        organizationId: z.string().uuid(),
+        storeId: z.string().uuid().optional()
+      }),
+      req.query
+    );
+    authorizeTenant(req.actor, query.organizationId);
+
+    const values = [query.organizationId, productId];
+    const storeClause = query.storeId
+      ? (values.push(query.storeId), `AND m.store_id = $${values.length}`)
+      : "";
+
+    const result = await pool.query(
+      `SELECT m.id,
+              m.type,
+              m.quantity_delta  AS "quantityDelta",
+              m.quantity_after  AS "quantityAfter",
+              m.note,
+              m.created_at      AS "createdAt",
+              u.name            AS "createdBy"
+       FROM commerce_inventory_movements m
+       LEFT JOIN commerce_users u ON u.id = m.created_by_user_id
+       WHERE m.organization_id = $1
+         AND m.product_id      = $2
+         ${storeClause}
+       ORDER BY m.created_at DESC
+       LIMIT 20`,
+      values
+    );
+
+    res.json({ data: result.rows });
+  })
+);
+
+// ── Update inventory item settings (reorder threshold, location) ──────────────
+
+inventoryRouter.patch(
+  "/:productId/settings",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const productId = z.string().uuid().parse(req.params.productId);
+    const body = parseZod(
+      z.object({
+        organizationId: z.string().uuid(),
+        storeId: z.string().uuid(),
+        reorderThreshold: z.number().int().min(0).optional(),
+        location: z.string().max(200).nullable().optional()
+      }),
+      req.body
+    );
+    authorizeTenant(req.actor, body.organizationId);
+
+    const setClauses = [];
+    const values = [body.organizationId, body.storeId, productId];
+
+    if (body.reorderThreshold !== undefined) {
+      values.push(body.reorderThreshold);
+      setClauses.push(`reorder_threshold = $${values.length}`);
+    }
+    if (body.location !== undefined) {
+      values.push(body.location);
+      setClauses.push(`location = $${values.length}`);
+    }
+
+    if (setClauses.length === 0) {
+      return res.json({ data: null });
+    }
+
+    setClauses.push("updated_at = NOW()");
+
+    const result = await pool.query(
+      `UPDATE commerce_inventory_items
+       SET ${setClauses.join(", ")}
+       WHERE organization_id = $1
+         AND store_id        = $2
+         AND product_id      = $3
+       RETURNING product_id AS "productId",
+                 reorder_threshold AS "reorderThreshold",
+                 location,
+                 updated_at AS "updatedAt"`,
+      values
+    );
+
+    if (result.rowCount === 0) {
+      // Row may not exist yet — upsert with defaults
+      const upsert = await pool.query(
+        `INSERT INTO commerce_inventory_items
+           (organization_id, store_id, product_id, quantity_on_hand,
+            reorder_threshold, location, track_inventory)
+         VALUES ($1, $2, $3, 0,
+            ${body.reorderThreshold !== undefined ? body.reorderThreshold : 0},
+            ${body.location !== undefined ? "$4" : "NULL"},
+            TRUE)
+         ON CONFLICT (organization_id, store_id, product_id) DO UPDATE
+           SET ${setClauses.join(", ")}
+         RETURNING product_id AS "productId",
+                   reorder_threshold AS "reorderThreshold",
+                   location,
+                   updated_at AS "updatedAt"`,
+        body.location !== undefined
+          ? [body.organizationId, body.storeId, productId, body.location]
+          : [body.organizationId, body.storeId, productId]
+      );
+      return res.json({ data: upsert.rows[0] });
+    }
+
+    res.json({ data: result.rows[0] });
   })
 );
 
@@ -459,5 +577,562 @@ inventoryRouter.post(
     });
 
     res.json({ data: results });
+  })
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// SUPPLIERS
+// ════════════════════════════════════════════════════════════════════════════
+
+const supplierSchema = z.object({
+  organizationId: z.string().uuid(),
+  name:           z.string().min(1).max(200),
+  vendorNumber:   z.string().max(100).optional().nullable(),
+  email:          z.string().email().optional().nullable(),
+  phone:          z.string().max(50).optional().nullable(),
+  addressLine1:   z.string().max(200).optional().nullable(),
+  city:           z.string().max(100).optional().nullable(),
+  region:         z.string().max(100).optional().nullable(),
+  postalCode:     z.string().max(20).optional().nullable(),
+  notes:          z.string().max(1000).optional().nullable()
+});
+
+inventoryRouter.get(
+  "/suppliers",
+  asyncHandler(async (req, res) => {
+    const query = parseZod(
+      z.object({ organizationId: z.string().uuid() }),
+      req.query
+    );
+    authorizeTenant(req.actor, query.organizationId);
+
+    const result = await pool.query(
+      `SELECT id, name, vendor_number AS "vendorNumber", email, phone,
+              address_line1 AS "addressLine1", city, region, postal_code AS "postalCode",
+              notes, active, created_at AS "createdAt", updated_at AS "updatedAt"
+       FROM commerce_inventory_suppliers
+       WHERE organization_id = $1
+       ORDER BY name ASC`,
+      [query.organizationId]
+    );
+    res.json({ data: result.rows });
+  })
+);
+
+inventoryRouter.post(
+  "/suppliers",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const body = parseZod(supplierSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
+
+    const result = await pool.query(
+      `INSERT INTO commerce_inventory_suppliers
+         (organization_id, name, vendor_number, email, phone,
+          address_line1, city, region, postal_code, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING id, name, vendor_number AS "vendorNumber", email, phone,
+                 address_line1 AS "addressLine1", city, region,
+                 postal_code AS "postalCode", notes, active,
+                 created_at AS "createdAt", updated_at AS "updatedAt"`,
+      [
+        body.organizationId, body.name, body.vendorNumber ?? null,
+        body.email ?? null, body.phone ?? null, body.addressLine1 ?? null,
+        body.city ?? null, body.region ?? null, body.postalCode ?? null,
+        body.notes ?? null
+      ]
+    );
+    res.status(201).json({ data: result.rows[0] });
+  })
+);
+
+inventoryRouter.patch(
+  "/suppliers/:id",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const supplierId = z.string().uuid().parse(req.params.id);
+    const body = parseZod(supplierSchema.partial().extend({
+      organizationId: z.string().uuid(),
+      active: z.boolean().optional()
+    }), req.body);
+    authorizeTenant(req.actor, body.organizationId);
+
+    const fields = ["updated_at = NOW()"];
+    const values = [body.organizationId, supplierId];
+    const optional = {
+      name: body.name, vendor_number: body.vendorNumber, email: body.email,
+      phone: body.phone, address_line1: body.addressLine1, city: body.city,
+      region: body.region, postal_code: body.postalCode,
+      notes: body.notes, active: body.active
+    };
+    for (const [col, val] of Object.entries(optional)) {
+      if (val !== undefined) {
+        values.push(val);
+        fields.push(`${col} = $${values.length}`);
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE commerce_inventory_suppliers
+       SET ${fields.join(", ")}
+       WHERE organization_id = $1 AND id = $2
+       RETURNING id, name, vendor_number AS "vendorNumber", email, phone,
+                 address_line1 AS "addressLine1", city, region,
+                 postal_code AS "postalCode", notes, active,
+                 updated_at AS "updatedAt"`,
+      values
+    );
+    if (result.rowCount === 0) throw notFound("Supplier not found");
+    res.json({ data: result.rows[0] });
+  })
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// INVOICES
+// ════════════════════════════════════════════════════════════════════════════
+
+const invoiceLineSchema = z.object({
+  productId:      z.string().uuid().optional().nullable(),
+  productName:    z.string().min(1).max(300),
+  sku:            z.string().max(100).optional().nullable(),
+  quantity:       z.number().int().positive(),
+  unitCostCents:  z.number().int().min(0),
+  matchStatus:    z.enum(["matched", "manual", "skipped", "unmatched"]).default("matched"),
+  confidence:     z.number().min(0).max(1).optional().nullable(),
+  aiExtractedText: z.string().optional().nullable()
+});
+
+const invoiceCreateSchema = z.object({
+  organizationId: z.string().uuid(),
+  storeId:        z.string().uuid().optional().nullable(),
+  supplierId:     z.string().uuid().optional().nullable(),
+  invoiceNumber:  z.string().max(100).optional().nullable(),
+  invoiceDate:    z.string().optional().nullable(),
+  receivedDate:   z.string().optional().nullable(),
+  source:         z.enum(["manual", "ai_image", "ai_pdf", "csv"]).default("manual"),
+  notes:          z.string().max(2000).optional().nullable(),
+  rawFileUrl:     z.string().url().optional().nullable(),
+  lines:          z.array(invoiceLineSchema).min(1)
+});
+
+inventoryRouter.get(
+  "/invoices",
+  asyncHandler(async (req, res) => {
+    const query = parseZod(
+      z.object({
+        organizationId: z.string().uuid(),
+        status: z.string().optional(),
+        storeId: z.string().uuid().optional(),
+        limit: z.coerce.number().int().min(1).max(200).default(50)
+      }),
+      req.query
+    );
+    authorizeTenant(req.actor, query.organizationId);
+
+    const values = [query.organizationId];
+    const clauses = ["i.organization_id = $1"];
+    if (query.status) { values.push(query.status); clauses.push(`i.status = $${values.length}`); }
+    if (query.storeId) { values.push(query.storeId); clauses.push(`i.store_id = $${values.length}`); }
+    values.push(query.limit);
+
+    const result = await pool.query(
+      `SELECT i.id, i.invoice_number AS "invoiceNumber", i.invoice_date AS "invoiceDate",
+              i.received_date AS "receivedDate", i.source, i.status,
+              i.total_cents AS "totalCents", i.tax_cents AS "taxCents",
+              i.notes, i.attachment_url AS "rawFileUrl",
+              i.approved_at AS "approvedAt", i.created_at AS "createdAt",
+              s.name AS "supplierName", st.name AS "storeName",
+              u.name AS "approvedBy", cu.name AS "createdByName",
+              COUNT(l.id)::int AS "lineCount"
+       FROM commerce_inventory_invoices i
+       LEFT JOIN commerce_inventory_suppliers s  ON s.id = i.supplier_id
+       LEFT JOIN commerce_stores            st  ON st.id = i.store_id
+       LEFT JOIN commerce_users              u  ON u.id = i.approved_by_user_id
+       LEFT JOIN commerce_users             cu  ON cu.id = i.created_by
+       LEFT JOIN commerce_inventory_invoice_lines l ON l.invoice_id = i.id
+       WHERE ${clauses.join(" AND ")}
+       GROUP BY i.id, s.name, st.name, u.name, cu.name
+       ORDER BY i.created_at DESC
+       LIMIT $${values.length}`,
+      values
+    );
+    res.json({ data: result.rows });
+  })
+);
+
+inventoryRouter.get(
+  "/invoices/:id",
+  asyncHandler(async (req, res) => {
+    const invoiceId = z.string().uuid().parse(req.params.id);
+    const query = parseZod(z.object({ organizationId: z.string().uuid() }), req.query);
+    authorizeTenant(req.actor, query.organizationId);
+
+    const [invoiceResult, linesResult] = await Promise.all([
+      pool.query(
+        `SELECT i.id, i.invoice_number AS "invoiceNumber", i.invoice_date AS "invoiceDate",
+                i.received_date AS "receivedDate", i.source, i.status,
+                i.total_cents AS "totalCents", i.tax_cents AS "taxCents",
+                i.notes, i.attachment_url AS "rawFileUrl",
+                i.approved_at AS "approvedAt", i.created_at AS "createdAt",
+                s.name AS "supplierName", s.id AS "supplierId",
+                st.name AS "storeName", st.id AS "storeId",
+                u.name AS "approvedBy", cu.name AS "createdByName"
+         FROM commerce_inventory_invoices i
+         LEFT JOIN commerce_inventory_suppliers s  ON s.id = i.supplier_id
+         LEFT JOIN commerce_stores            st  ON st.id = i.store_id
+         LEFT JOIN commerce_users              u  ON u.id = i.approved_by_user_id
+         LEFT JOIN commerce_users             cu  ON cu.id = i.created_by
+         WHERE i.organization_id = $1 AND i.id = $2`,
+        [query.organizationId, invoiceId]
+      ),
+      pool.query(
+        `SELECT l.id, l.product_id AS "productId", l.product_name AS "productName",
+                l.sku, l.quantity, l.unit_cost_cents AS "unitCostCents",
+                l.line_total_cents AS "lineTotalCents", l.match_status AS "matchStatus",
+                l.confidence, l.ai_extracted_text AS "aiExtractedText",
+                p.name AS "currentProductName"
+         FROM commerce_inventory_invoice_lines l
+         LEFT JOIN commerce_products p ON p.id = l.product_id
+         WHERE l.invoice_id = $1 AND l.organization_id = $2
+         ORDER BY l.created_at ASC`,
+        [invoiceId, query.organizationId]
+      )
+    ]);
+
+    if (invoiceResult.rowCount === 0) throw notFound("Invoice not found");
+    res.json({ data: { ...invoiceResult.rows[0], lines: linesResult.rows } });
+  })
+);
+
+inventoryRouter.post(
+  "/invoices",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const body = parseZod(invoiceCreateSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
+    const actor = getActor(req);
+
+    const invoice = await withTransaction(async (client) => {
+      // Calculate totals from lines
+      const totalCents = body.lines.reduce(
+        (sum, l) => sum + l.quantity * l.unitCostCents, 0
+      );
+
+      const invResult = await client.query(
+        `INSERT INTO commerce_inventory_invoices
+           (organization_id, store_id, supplier_id, invoice_number, invoice_date,
+            received_date, source, total_cents, notes, attachment_url, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         RETURNING id, invoice_number AS "invoiceNumber", status,
+                   total_cents AS "totalCents", created_at AS "createdAt"`,
+        [
+          body.organizationId, body.storeId ?? null, body.supplierId ?? null,
+          body.invoiceNumber ?? null, body.invoiceDate ?? null,
+          body.receivedDate ?? null, body.source, totalCents,
+          body.notes ?? null, body.rawFileUrl ?? null,
+          actor.actorUserId ?? null
+        ]
+      );
+
+      const invoiceId = invResult.rows[0].id;
+
+      // Insert all lines
+      for (const line of body.lines) {
+        await client.query(
+          `INSERT INTO commerce_inventory_invoice_lines
+             (organization_id, invoice_id, product_id, ai_extracted_text,
+              product_name, sku, quantity, unit_cost_cents, match_status, confidence)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            body.organizationId, invoiceId, line.productId ?? null,
+            line.aiExtractedText ?? null, line.productName,
+            line.sku ?? null, line.quantity, line.unitCostCents,
+            line.matchStatus, line.confidence ?? null
+          ]
+        );
+      }
+
+      return invResult.rows[0];
+    });
+
+    res.status(201).json({ data: invoice });
+  })
+);
+
+inventoryRouter.post(
+  "/invoices/:id/approve",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const invoiceId = z.string().uuid().parse(req.params.id);
+    const body = parseZod(
+      z.object({
+        organizationId: z.string().uuid(),
+        updateProductCost: z.boolean().default(true)
+      }),
+      req.body
+    );
+    authorizeTenant(req.actor, body.organizationId);
+    const actor = getActor(req);
+
+    const result = await withTransaction(async (client) => {
+      // Lock and load invoice
+      const invResult = await client.query(
+        `SELECT id, status, store_id AS "storeId", organization_id AS "organizationId"
+         FROM commerce_inventory_invoices
+         WHERE organization_id = $1 AND id = $2
+         FOR UPDATE`,
+        [body.organizationId, invoiceId]
+      );
+      const invoice = invResult.rows[0];
+      if (!invoice) throw notFound("Invoice not found");
+      if (invoice.status !== "pending") {
+        throw badRequest(`Invoice is already ${invoice.status}`);
+      }
+
+      // Load lines where a product is matched and not skipped
+      const linesResult = await client.query(
+        `SELECT id, product_id AS "productId", product_name AS "productName",
+                quantity, unit_cost_cents AS "unitCostCents", match_status AS "matchStatus"
+         FROM commerce_inventory_invoice_lines
+         WHERE invoice_id = $1
+           AND organization_id = $2
+           AND match_status != 'skipped'
+           AND product_id IS NOT NULL`,
+        [invoiceId, body.organizationId]
+      );
+
+      const storeId = invoice.storeId;
+      if (!storeId) throw badRequest("Invoice has no store — set a store before approving");
+
+      let appliedLines = 0;
+
+      for (const line of linesResult.rows) {
+        // Upsert inventory item and increment stock
+        const itemResult = await client.query(
+          `INSERT INTO commerce_inventory_items
+             (organization_id, store_id, product_id, quantity_on_hand, track_inventory)
+           VALUES ($1, $2, $3, $4, TRUE)
+           ON CONFLICT (organization_id, store_id, product_id) DO UPDATE
+             SET quantity_on_hand = commerce_inventory_items.quantity_on_hand + $4,
+                 track_inventory  = TRUE,
+                 updated_at       = NOW()
+           RETURNING quantity_on_hand AS "quantityOnHand"`,
+          [body.organizationId, storeId, line.productId, line.quantity]
+        );
+
+        const qtyAfter = Number(itemResult.rows[0].quantityOnHand);
+
+        // Write receive movement
+        await client.query(
+          `INSERT INTO commerce_inventory_movements
+             (organization_id, store_id, product_id, type,
+              quantity_delta, quantity_after, note, created_by_user_id)
+           VALUES ($1, $2, $3, 'receive', $4, $5, $6, $7)`,
+          [
+            body.organizationId, storeId, line.productId,
+            line.quantity, qtyAfter,
+            `Invoice approved — ${line.productName}`,
+            actor.actorUserId ?? null
+          ]
+        );
+
+        // Optionally update product cost_cents to latest received cost
+        if (body.updateProductCost && line.unitCostCents > 0) {
+          await client.query(
+            `UPDATE commerce_products
+             SET cost_cents = $2, updated_at = NOW()
+             WHERE organization_id = $1 AND id = $3`,
+            [body.organizationId, line.unitCostCents, line.productId]
+          );
+        }
+
+        appliedLines++;
+      }
+
+      // Mark invoice approved
+      await client.query(
+        `UPDATE commerce_inventory_invoices
+         SET status = 'approved', approved_by_user_id = $2, approved_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND organization_id = $3`,
+        [invoiceId, actor.actorUserId ?? null, body.organizationId]
+      );
+
+      return { invoiceId, appliedLines };
+    });
+
+    res.json({ data: result });
+  })
+);
+
+inventoryRouter.post(
+  "/invoices/:id/reject",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const invoiceId = z.string().uuid().parse(req.params.id);
+    const body = parseZod(
+      z.object({ organizationId: z.string().uuid() }),
+      req.body
+    );
+    authorizeTenant(req.actor, body.organizationId);
+
+    const result = await pool.query(
+      `UPDATE commerce_inventory_invoices
+       SET status = 'rejected', updated_at = NOW()
+       WHERE organization_id = $1 AND id = $2 AND status = 'pending'
+       RETURNING id, status`,
+      [body.organizationId, invoiceId]
+    );
+    if (result.rowCount === 0) throw notFound("Invoice not found or already processed");
+    res.json({ data: result.rows[0] });
+  })
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// TRANSFERS
+// ════════════════════════════════════════════════════════════════════════════
+
+const transferSchema = z.object({
+  organizationId: z.string().uuid(),
+  fromStoreId:    z.string().uuid(),
+  toStoreId:      z.string().uuid(),
+  productId:      z.string().uuid(),
+  quantity:       z.number().int().positive(),
+  note:           z.string().max(500).optional().nullable()
+});
+
+inventoryRouter.get(
+  "/transfers",
+  asyncHandler(async (req, res) => {
+    const query = parseZod(
+      z.object({
+        organizationId: z.string().uuid(),
+        limit: z.coerce.number().int().min(1).max(200).default(50)
+      }),
+      req.query
+    );
+    authorizeTenant(req.actor, query.organizationId);
+
+    const result = await pool.query(
+      `SELECT t.id, t.quantity, t.note, t.status,
+              t.created_at AS "createdAt", t.completed_at AS "completedAt",
+              p.name AS "productName", p.sku,
+              fs.name AS "fromStoreName", ts.name AS "toStoreName",
+              u.name AS "createdBy"
+       FROM commerce_inventory_transfers t
+       JOIN commerce_products p  ON p.id = t.product_id
+       JOIN commerce_stores   fs ON fs.id = t.from_store_id
+       JOIN commerce_stores   ts ON ts.id = t.to_store_id
+       LEFT JOIN commerce_users u ON u.id = t.created_by_user_id
+       WHERE t.organization_id = $1
+       ORDER BY t.created_at DESC
+       LIMIT $2`,
+      [query.organizationId, query.limit]
+    );
+    res.json({ data: result.rows });
+  })
+);
+
+inventoryRouter.post(
+  "/transfers",
+  requirePermission("products:write"),
+  asyncHandler(async (req, res) => {
+    const body = parseZod(transferSchema, req.body);
+    authorizeTenant(req.actor, body.organizationId);
+    const actor = getActor(req);
+
+    if (body.fromStoreId === body.toStoreId) {
+      throw badRequest("Source and destination store must be different");
+    }
+
+    const transfer = await withTransaction(async (client) => {
+      // Verify product exists
+      const prodResult = await client.query(
+        `SELECT id, name FROM commerce_products
+         WHERE organization_id = $1 AND id = $2 AND active = TRUE`,
+        [body.organizationId, body.productId]
+      );
+      if (prodResult.rowCount === 0) throw notFound("Product not found");
+      const product = prodResult.rows[0];
+
+      // Check source stock (FOR UPDATE prevents concurrent transfers)
+      const srcResult = await client.query(
+        `SELECT quantity_on_hand AS qty
+         FROM commerce_inventory_items
+         WHERE organization_id = $1 AND store_id = $2 AND product_id = $3
+         FOR UPDATE`,
+        [body.organizationId, body.fromStoreId, body.productId]
+      );
+      const srcQty = srcResult.rowCount > 0 ? Number(srcResult.rows[0].qty) : 0;
+      if (srcQty < body.quantity) {
+        throw badRequest(`Not enough stock — ${srcQty} available, ${body.quantity} requested`);
+      }
+
+      const srcAfter = srcQty - body.quantity;
+
+      // Decrement source
+      await client.query(
+        `UPDATE commerce_inventory_items
+         SET quantity_on_hand = $4, updated_at = NOW()
+         WHERE organization_id = $1 AND store_id = $2 AND product_id = $3`,
+        [body.organizationId, body.fromStoreId, body.productId, srcAfter]
+      );
+
+      // Increment destination (upsert)
+      const dstResult = await client.query(
+        `INSERT INTO commerce_inventory_items
+           (organization_id, store_id, product_id, quantity_on_hand, track_inventory)
+         VALUES ($1, $2, $3, $4, TRUE)
+         ON CONFLICT (organization_id, store_id, product_id) DO UPDATE
+           SET quantity_on_hand = commerce_inventory_items.quantity_on_hand + $4,
+               track_inventory  = TRUE,
+               updated_at       = NOW()
+         RETURNING quantity_on_hand AS qty`,
+        [body.organizationId, body.toStoreId, body.productId, body.quantity]
+      );
+      const dstAfter = Number(dstResult.rows[0].qty);
+
+      const noteText = body.note || `Transfer: ${product.name}`;
+
+      // Write movements for both sides
+      await client.query(
+        `INSERT INTO commerce_inventory_movements
+           (organization_id, store_id, product_id, type,
+            quantity_delta, quantity_after, note, created_by_user_id)
+         VALUES
+           ($1, $2, $3, 'adjustment', $4, $5, $6, $7),
+           ($1, $8, $3, 'adjustment', $9, $10, $11, $7)`,
+        [
+          body.organizationId,
+          body.fromStoreId, body.productId, -body.quantity, srcAfter,
+          `${noteText} (out → ${body.toStoreId})`, actor.actorUserId ?? null,
+          body.toStoreId, body.quantity, dstAfter,
+          `${noteText} (in ← ${body.fromStoreId})`
+        ]
+      );
+
+      // Create transfer record
+      const txResult = await client.query(
+        `INSERT INTO commerce_inventory_transfers
+           (organization_id, from_store_id, to_store_id, product_id,
+            quantity, note, status, created_by_user_id, completed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,'completed',$7,NOW())
+         RETURNING id, status, created_at AS "createdAt", completed_at AS "completedAt"`,
+        [
+          body.organizationId, body.fromStoreId, body.toStoreId,
+          body.productId, body.quantity, body.note ?? null,
+          actor.actorUserId ?? null
+        ]
+      );
+
+      return {
+        ...txResult.rows[0],
+        productName: product.name,
+        quantity: body.quantity,
+        srcAfter,
+        dstAfter
+      };
+    });
+
+    res.status(201).json({ data: transfer });
   })
 );

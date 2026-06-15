@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOnlineStatus } from "../lib/useOnlineStatus";
 import { apiGet, apiPost } from "../lib/api";
 import { useLanguage } from "../lib/i18n/LanguageContext";
+import { saveRegisterStore } from "../lib/organizationContext";
+import type { Store } from "../lib/demoTypes";
 
 type OrgFeatures = Record<string, boolean>;
 
@@ -14,6 +16,7 @@ type CurrentSession = {
     name: string | null;
     email: string | null;
     role: string;
+    organizationId: string | null;
     organizationName: string | null;
     orgFeatures?: OrgFeatures;
   };
@@ -101,6 +104,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<CurrentSession | null>(null);
   const isRegisterPath = pathname === "/register" || pathname.startsWith("/register/");
   const canAccessWorkspace = workspaceRoles.has(session?.user.role || "");
+  const userLevel = ROLE_LEVEL[session?.user.role ?? ""] ?? 0;
+  const canSwitchStore = isRegisterPath && userLevel >= 3;
+
+  const [stores, setStores] = useState<Store[]>([]);
+  const [currentStoreId, setCurrentStoreId] = useState<string | null>(null);
+  const [storeSwitcherOpen, setStoreSwitcherOpen] = useState(false);
+  const storeSwitcherRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(SIDEBAR_KEY) === "true");
@@ -114,6 +124,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => { if (!cancelled) router.replace(`/login?next=${encodeURIComponent(pathname)}`); });
     return () => { cancelled = true; };
   }, [pathname, router]);
+
+  useEffect(() => {
+    if (!canSwitchStore || !session?.user.organizationId) return;
+    apiGet<Store[]>(`/stores?organizationId=${session.user.organizationId}`)
+      .then((list) => {
+        setStores(list);
+        try {
+          const saved = localStorage.getItem("commerce_pos_register_store");
+          if (saved) {
+            const { id } = JSON.parse(saved) as { id: string };
+            if (list.find((s) => s.id === id)) { setCurrentStoreId(id); return; }
+          }
+        } catch {}
+        if (list[0]) setCurrentStoreId(list[0].id);
+      })
+      .catch(() => {});
+  }, [canSwitchStore, session?.user.organizationId]);
+
+  useEffect(() => {
+    if (!storeSwitcherOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (storeSwitcherRef.current && !storeSwitcherRef.current.contains(e.target as Node)) {
+        setStoreSwitcherOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [storeSwitcherOpen]);
+
+  function switchStore(store: Store) {
+    saveRegisterStore(store);
+    setStoreSwitcherOpen(false);
+    window.location.reload();
+  }
 
   function toggleSidebar() {
     setCollapsed((cur) => {
@@ -138,18 +182,73 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (pathname.startsWith("/parent")) return <>{children}</>;
 
   if (isRegisterPath) {
+    const currentStore = stores.find((s) => s.id === currentStoreId);
     return (
       <div className="registerShell">
         <header className="registerTopbar">
-          <Link className="registerBrand" href="/register">
-            <span className="brandMark">
-              <span className="material-symbols-outlined fill" aria-hidden="true">local_cafe</span>
-            </span>
-            <div>
-              <strong>Commerce POS</strong>
-              <span>{t("shell.cafeteriaRegister")}</span>
-            </div>
-          </Link>
+          <div className="registerTopbarLeft">
+            <Link className="registerBrand" href="/register">
+              <span className="brandMark">
+                <span className="material-symbols-outlined fill" aria-hidden="true">local_cafe</span>
+              </span>
+              <div>
+                <strong>Commerce POS</strong>
+                <span>{t("shell.cafeteriaRegister")}</span>
+              </div>
+            </Link>
+
+            {canSwitchStore && stores.length > 0 && (
+              <>
+                <span className="registerTopbarDivider" aria-hidden="true" />
+                <div className="storeSwitcher" ref={storeSwitcherRef}>
+                  <button
+                    type="button"
+                    className={`storeSwitcherBtn${storeSwitcherOpen ? " open" : ""}`}
+                    onClick={() => setStoreSwitcherOpen((o) => !o)}
+                    aria-haspopup="listbox"
+                    aria-expanded={storeSwitcherOpen}
+                  >
+                    <span className="material-symbols-outlined" aria-hidden="true">store</span>
+                    <span>{currentStore?.name ?? t("common.store")}</span>
+                    <span className="material-symbols-outlined" aria-hidden="true">
+                      {storeSwitcherOpen ? "expand_less" : "expand_more"}
+                    </span>
+                  </button>
+
+                  {storeSwitcherOpen && (
+                    <div className="storeSwitcherDropdown" role="listbox">
+                      <div className="storeSwitcherHeader">
+                        <span className="material-symbols-outlined" aria-hidden="true">store</span>
+                        <span>Switch Store</span>
+                      </div>
+                      <div className="storeSwitcherDivider" />
+                      {stores.map((store) => {
+                        const active = store.id === currentStoreId;
+                        return (
+                          <button
+                            key={store.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            className={`storeSwitcherItem${active ? " active" : ""}`}
+                            onClick={() => switchStore(store)}
+                          >
+                            <span>{store.name}</span>
+                            {active && (
+                              <span className="material-symbols-outlined" aria-hidden="true">check</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                      <div className="storeSwitcherDivider" />
+                      <div className="storeSwitcherFooter">Switching stores reloads the register</div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
           <nav className="registerTerminalNav" aria-label="Register tools">
             <Link className={pathname === "/register" ? "active" : ""} href="/register">
               <span className="material-symbols-outlined" aria-hidden="true">point_of_sale</span>
@@ -164,6 +263,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {t("shell.addCustomer")}
             </Link>
           </nav>
+
           <div className="registerTopbarMeta">
             {session?.user.organizationName && (
               <strong>{session.user.organizationName}</strong>

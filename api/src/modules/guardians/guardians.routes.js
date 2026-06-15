@@ -160,8 +160,8 @@ guardiansRouter.post(
     });
 
     const full = await pool.query(
-      `${GUARDIAN_SELECT} WHERE g.id = $1 GROUP BY g.id`,
-      [guardianRow]
+      `${GUARDIAN_SELECT} WHERE g.id = $1 AND g.organization_id = $2 GROUP BY g.id`,
+      [guardianRow, body.organizationId]
     );
     res.status(201).json({ data: full.rows[0] });
   })
@@ -234,6 +234,20 @@ guardiansRouter.post(
     );
     authorizeTenant(req.actor, body.organizationId);
 
+    // Verify both guardian and student belong to this org before linking
+    const [gCheck, sCheck] = await Promise.all([
+      pool.query(
+        `SELECT id FROM commerce_guardians WHERE id = $1 AND organization_id = $2 AND active = TRUE`,
+        [guardianId, body.organizationId]
+      ),
+      pool.query(
+        `SELECT id FROM commerce_customers WHERE id = $1 AND organization_id = $2`,
+        [body.studentId, body.organizationId]
+      ),
+    ]);
+    if (gCheck.rowCount === 0) throw notFound("Guardian not found");
+    if (sCheck.rowCount === 0) throw notFound("Student not found");
+
     await pool.query(
       `INSERT INTO commerce_guardian_students
          (guardian_id, student_id, organization_id, relationship, is_primary)
@@ -289,9 +303,9 @@ guardiansRouter.post(
 
     const students = await pool.query(
       `SELECT c.name FROM commerce_guardian_students gs
-       JOIN commerce_customers c ON c.id = gs.student_id
-       WHERE gs.guardian_id = $1`,
-      [guardianId]
+       JOIN commerce_customers c ON c.id = gs.student_id AND c.organization_id = $2
+       WHERE gs.guardian_id = $1 AND gs.organization_id = $2`,
+      [guardianId, organizationId]
     );
     const studentNames = students.rows.map((r) => r.name);
 
