@@ -179,10 +179,11 @@ staffRouter.patch(
     }
 
     vals.push(req.params.id);
+    vals.push(existing.organizationId);
     const result = await pool.query(
       `
         UPDATE commerce_users SET ${cols.join(", ")}
-        WHERE id = $${i}
+        WHERE id = $${i} AND organization_id = $${i + 1}
         RETURNING id, organization_id AS "organizationId", name, email, role, active,
                   pin_last4 AS "pinLast4", pin_set_at AS "pinSetAt", created_at AS "createdAt",
                   avatar_public_id AS "avatarPublicId"
@@ -210,11 +211,11 @@ staffRouter.post(
       `
         UPDATE commerce_users
         SET pin_hash = $1, pin_salt = $2, pin_last4 = $3, pin_set_at = NOW()
-        WHERE id = $4
+        WHERE id = $4 AND organization_id = $5
         RETURNING id, organization_id AS "organizationId", name, email, role, active,
                   pin_last4 AS "pinLast4", pin_set_at AS "pinSetAt"
       `,
-      [hash, salt, pinLast4, req.params.id]
+      [hash, salt, pinLast4, req.params.id, existing.organizationId]
     );
 
     await pool.query(

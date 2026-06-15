@@ -15,33 +15,26 @@ function toNum(v: number | string | null | undefined) {
   return typeof v === "string" ? Number(v) : (v ?? 0);
 }
 
-function formatRelative(iso: string | null) {
-  if (!iso) return "Never";
+function formatRelative(iso: string | null, never: string, justNow: string) {
+  if (!iso) return never;
   const diff = Date.now() - new Date(iso).getTime();
   const mins  = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days  = Math.floor(diff / 86400000);
-  if (mins  < 2)   return "Just now";
-  if (mins  < 60)  return `${mins}m ago`;
-  if (hours < 24)  return `${hours}h ago`;
-  if (days  < 30)  return `${days}d ago`;
+  if (mins  < 2)   return justNow;
+  if (mins  < 60)  return `${mins}m`;
+  if (hours < 24)  return `${hours}h`;
+  if (days  < 30)  return `${days}d`;
   return new Date(iso).toLocaleDateString();
-}
-
-function movementLabel(type: string) {
-  if (type === "receive")    return "Received";
-  if (type === "sale")       return "Sold";
-  if (type === "adjustment") return "Adjusted";
-  return type;
 }
 
 const STATUS_ORDER = { out: 0, low: 1, not_tracked: 2, in_stock: 3 } as const;
 
 const STATUS_COLOR = {
-  out:         { dot: "#ef4444", bar: "#fca5a5", label: "Out of stock",  bg: "#fef2f2" },
-  low:         { dot: "#f59e0b", bar: "#fcd34d", label: "Low stock",     bg: "#fffbeb" },
-  in_stock:    { dot: "#22c55e", bar: "#86efac", label: "In stock",      bg: "#f0fdf4" },
-  not_tracked: { dot: "#94a3b8", bar: "#cbd5e1", label: "Not tracked",   bg: "#f8fafc" },
+  out:         { dot: "#ef4444", bar: "#fca5a5", bg: "#fef2f2" },
+  low:         { dot: "#f59e0b", bar: "#fcd34d", bg: "#fffbeb" },
+  in_stock:    { dot: "#22c55e", bar: "#86efac", bg: "#f0fdf4" },
+  not_tracked: { dot: "#94a3b8", bar: "#cbd5e1", bg: "#f8fafc" },
 };
 
 // ── sub-components ────────────────────────────────────────────────────────────
@@ -86,6 +79,7 @@ function InventoryRow({
   selected: boolean;
   onClick: () => void;
 }) {
+  const { t } = useLanguage();
   const qty       = toNum(item.quantityOnHand);
   const threshold = toNum(item.reorderThreshold);
   const sc        = STATUS_COLOR[item.status] ?? STATUS_COLOR.not_tracked;
@@ -118,7 +112,7 @@ function InventoryRow({
           {item.name}
         </div>
         <div style={{ fontSize: "0.7rem", color: "#94a3b8", marginTop: 1 }}>
-          {item.sku ?? "No SKU"}{item.location ? ` · ${item.location}` : ""}
+          {item.sku ?? t("inventory.noSku")}{item.location ? ` · ${item.location}` : ""}
         </div>
       </div>
 
@@ -370,14 +364,14 @@ export function InventoryClient() {
 
   // ── render ───────────────────────────────────────────────────────────────────
 
-  const eyebrow = demo?.store?.name ?? demo?.organization?.name ?? "Inventory";
+  const eyebrow = demo?.store?.name ?? demo?.organization?.name ?? t("inventory.title");
 
   return (
     <section className="module">
-      <PageHeader eyebrow={eyebrow} title="Stock Management">
-        <button type="button" onClick={() => loadInventory()}>Refresh</button>
+      <PageHeader eyebrow={eyebrow} title={t("inventory.stockManagement")}>
+        <button type="button" onClick={() => loadInventory()}>{t("inventory.refresh")}</button>
         <button type="button" onClick={() => setShowImport(true)}>{t("common.importCsv")}</button>
-        <Link className="buttonLink primary" href="/inventory/receiving">+ Receive stock</Link>
+        <Link className="buttonLink primary" href="/inventory/receiving">+ {t("inventory.receiveStock")}</Link>
       </PageHeader>
 
       {error ? <p className="demoError">{error}</p> : null}
@@ -385,31 +379,31 @@ export function InventoryClient() {
       {/* ── Metric tiles ── */}
       <div className="metricGrid" style={{ marginBottom: 16 }}>
         <div className="metricTile">
-          <span>Total SKUs</span>
+          <span>{t("inventory.totalSkus")}</span>
           <strong>{totalItems}</strong>
-          <small>Products tracked</small>
+          <small>{t("inventory.productsTracked")}</small>
         </div>
         <div className="metricTile">
-          <span>In Stock</span>
+          <span>{t("inventory.inStock")}</span>
           <strong style={{ color: "#16a34a" }}>{inStockCount}</strong>
-          <small>Above reorder level</small>
+          <small>{t("inventory.aboveReorderLevel")}</small>
         </div>
         <div className="metricTile metricTile--warning">
-          <span>Low Stock</span>
+          <span>{t("inventory.lowStock")}</span>
           <strong>{lowCount}</strong>
-          <small>Below reorder level</small>
+          <small>{t("inventory.belowReorderLevel")}</small>
         </div>
         <div className="metricTile metricTile--danger">
-          <span>Out of Stock</span>
+          <span>{t("inventory.outOfStock")}</span>
           <strong>{outCount}</strong>
-          <small>Zero units</small>
+          <small>{t("inventory.zeroUnits")}</small>
         </div>
       </div>
 
       {/* ── Search + filter bar ── */}
       <div className="toolbar" style={{ marginBottom: 0 }}>
         <input
-          placeholder="Search product, SKU, location…"
+          placeholder={t("inventory.searchPlaceholder")}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -418,7 +412,7 @@ export function InventoryClient() {
           className={lowOnly ? "active" : ""}
           onClick={() => { const next = !lowOnly; setLowOnly(next); void loadInventory(next); }}
         >
-          Low stock only
+          {t("inventory.lowStockOnly")}
         </button>
       </div>
 
@@ -437,13 +431,13 @@ export function InventoryClient() {
         <div style={{ flex: 1, overflowY: "auto", borderRight: "1px solid #e2e8f0" }}>
           {filtered.length === 0 ? (
             <p style={{ padding: 32, textAlign: "center", color: "#94a3b8" }}>
-              No items match your filter.
+              {t("inventory.noItemsMatch")}
             </p>
           ) : (
             <>
               {grouped.out.length > 0 && (
                 <>
-                  <SectionDivider label="Out of stock" count={grouped.out.length} />
+                  <SectionDivider label={t("inventory.statusOutOfStock")} count={grouped.out.length} />
                   {grouped.out.map(item => (
                     <InventoryRow key={item.productId} item={item}
                       selected={selectedId === item.productId}
@@ -453,7 +447,7 @@ export function InventoryClient() {
               )}
               {grouped.low.length > 0 && (
                 <>
-                  <SectionDivider label="Low stock" count={grouped.low.length} />
+                  <SectionDivider label={t("inventory.statusLowStock")} count={grouped.low.length} />
                   {grouped.low.map(item => (
                     <InventoryRow key={item.productId} item={item}
                       selected={selectedId === item.productId}
@@ -463,7 +457,7 @@ export function InventoryClient() {
               )}
               {grouped.in_stock.length > 0 && (
                 <>
-                  <SectionDivider label="In stock" count={grouped.in_stock.length} />
+                  <SectionDivider label={t("inventory.statusInStock")} count={grouped.in_stock.length} />
                   {grouped.in_stock.map(item => (
                     <InventoryRow key={item.productId} item={item}
                       selected={selectedId === item.productId}
@@ -473,7 +467,7 @@ export function InventoryClient() {
               )}
               {grouped.not_tracked.length > 0 && (
                 <>
-                  <SectionDivider label="Not tracked" count={grouped.not_tracked.length} />
+                  <SectionDivider label={t("inventory.statusNotTracked")} count={grouped.not_tracked.length} />
                   {grouped.not_tracked.map(item => (
                     <InventoryRow key={item.productId} item={item}
                       selected={selectedId === item.productId}
@@ -510,7 +504,7 @@ export function InventoryClient() {
             color: "#94a3b8", fontSize: "0.85rem", padding: 32,
             background: "#f8fafc", textAlign: "center"
           }}>
-            Select a product to<br />view details and adjust stock
+            {t("inventory.selectProduct")}
           </div>
         )}
       </div>
@@ -560,6 +554,7 @@ function DetailPanel({
   reorderSaving: boolean;
   onSaveReorder: () => void;
 }) {
+  const { t } = useLanguage();
   const qty       = toNum(item.quantityOnHand);
   const threshold = toNum(item.reorderThreshold);
   const price     = toNum(item.priceCents);
@@ -568,6 +563,21 @@ function DetailPanel({
     ? Math.round(((price - cost) / price) * 1000) / 10
     : null;
   const sc        = STATUS_COLOR[item.status] ?? STATUS_COLOR.not_tracked;
+
+  function statusLabel(status: string) {
+    if (status === "out")         return t("inventory.statusOutOfStock");
+    if (status === "low")         return t("inventory.statusLowStock");
+    if (status === "in_stock")    return t("inventory.statusInStock");
+    if (status === "not_tracked") return t("inventory.statusNotTracked");
+    return status;
+  }
+
+  function movementLabel(type: string) {
+    if (type === "receive")    return t("inventory.movementReceived");
+    if (type === "sale")       return t("inventory.movementSold");
+    if (type === "adjustment") return t("inventory.movementAdjusted");
+    return type;
+  }
 
   const labelStyle: React.CSSProperties = {
     fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
@@ -601,14 +611,14 @@ function DetailPanel({
           {item.name}
         </div>
         <div style={{ fontSize: "0.7rem", color: "#94a3b8" }}>
-          {item.sku ? `SKU: ${item.sku}` : "No SKU"}
+          {item.sku ? `SKU: ${item.sku}` : t("inventory.noSku")}
         </div>
         <div style={{
           marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6,
           background: sc.bg, borderRadius: 20, padding: "3px 10px"
         }}>
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: sc.dot }} />
-          <span style={{ fontSize: "0.7rem", fontWeight: 600, color: sc.dot }}>{sc.label}</span>
+          <span style={{ fontSize: "0.7rem", fontWeight: 600, color: sc.dot }}>{statusLabel(item.status)}</span>
         </div>
       </Card>
 
@@ -616,24 +626,24 @@ function DetailPanel({
       <Card>
         <div style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
           color: "#94a3b8", textTransform: "uppercase", marginBottom: 10 }}>
-          Stock levels
+          {t("inventory.stockLevels")}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 0" }}>
           <div>
-            <div style={labelStyle}>On hand</div>
+            <div style={labelStyle}>{t("inventory.onHand")}</div>
             <div style={{ ...valStyle, fontSize: "1.4rem", color: sc.dot }}>{qty}</div>
           </div>
           <div>
-            <div style={labelStyle}>Reorder at</div>
+            <div style={labelStyle}>{t("inventory.reorderAt")}</div>
             <div style={{ ...valStyle, fontSize: "1.4rem" }}>{threshold}</div>
           </div>
           <div>
-            <div style={labelStyle}>Location</div>
+            <div style={labelStyle}>{t("inventory.location")}</div>
             <div style={valStyle}>{item.location ?? "—"}</div>
           </div>
           <div>
-            <div style={labelStyle}>Last updated</div>
-            <div style={valStyle}>{formatRelative(item.updatedAt)}</div>
+            <div style={labelStyle}>{t("inventory.lastUpdated")}</div>
+            <div style={valStyle}>{formatRelative(item.updatedAt, t("inventory.never"), t("inventory.justNow"))}</div>
           </div>
         </div>
         <div style={{ marginTop: 10 }}>
@@ -645,7 +655,7 @@ function DetailPanel({
       <Card>
         <div style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
           color: "#94a3b8", textTransform: "uppercase", marginBottom: 10 }}>
-          Adjust stock
+          {t("inventory.adjustStock")}
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           {[-10, -1].map(d => (
@@ -685,7 +695,7 @@ function DetailPanel({
         <input
           value={adjustNote}
           onChange={e => setAdjustNote(e.target.value)}
-          placeholder="Note (optional)"
+          placeholder={t("inventory.adjustNote")}
           style={{
             width: "100%", padding: "6px 10px", border: "1px solid #d1d5db",
             borderRadius: 6, fontSize: "0.8rem", boxSizing: "border-box", marginBottom: 8
@@ -703,7 +713,7 @@ function DetailPanel({
             fontSize: "0.85rem"
           }}
         >
-          {adjustSaving ? "Saving…" : "Save adjustment"}
+          {adjustSaving ? t("common.saving") : t("inventory.saveAdjustment")}
         </button>
         {adjustMsg && (
           <p style={{ marginTop: 6, fontSize: "0.75rem",
@@ -717,7 +727,7 @@ function DetailPanel({
       <Card>
         <div style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
           color: "#94a3b8", textTransform: "uppercase", marginBottom: 10 }}>
-          Reorder threshold
+          {t("inventory.reorderThresholdLabel")}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -740,11 +750,11 @@ function DetailPanel({
               border: "none", fontWeight: 600, cursor: "pointer", fontSize: "0.8rem"
             }}
           >
-            {reorderSaving ? "…" : "Save"}
+            {reorderSaving ? "…" : t("common.save")}
           </button>
         </div>
         <p style={{ fontSize: "0.7rem", color: "#94a3b8", marginTop: 6, marginBottom: 0 }}>
-          Alert triggers when stock falls to or below this number.
+          {t("inventory.reorderHint")}
         </p>
       </Card>
 
@@ -752,21 +762,21 @@ function DetailPanel({
       <Card>
         <div style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
           color: "#94a3b8", textTransform: "uppercase", marginBottom: 10 }}>
-          Financials
+          {t("inventory.financials")}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <div>
-            <div style={labelStyle}>Sale price</div>
+            <div style={labelStyle}>{t("inventory.salePrice")}</div>
             <div style={valStyle}>{formatMoney(price)}</div>
           </div>
           {cost > 0 && (
             <>
               <div>
-                <div style={labelStyle}>Unit cost</div>
+                <div style={labelStyle}>{t("inventory.unitCost")}</div>
                 <div style={valStyle}>{formatMoney(cost)}</div>
               </div>
               <div style={{ gridColumn: "1 / -1" }}>
-                <div style={labelStyle}>Gross margin</div>
+                <div style={labelStyle}>{t("inventory.grossMargin")}</div>
                 <div style={{ ...valStyle, color: margin && margin > 0 ? "#16a34a" : "#dc2626" }}>
                   {margin !== null ? `${margin}%` : "—"}
                 </div>
@@ -775,8 +785,8 @@ function DetailPanel({
           )}
           {(!cost || cost === 0) && (
             <div>
-              <div style={labelStyle}>Unit cost</div>
-              <div style={{ ...valStyle, color: "#94a3b8" }}>Not set</div>
+              <div style={labelStyle}>{t("inventory.unitCost")}</div>
+              <div style={{ ...valStyle, color: "#94a3b8" }}>{t("inventory.costNotSet")}</div>
             </div>
           )}
         </div>
@@ -786,12 +796,12 @@ function DetailPanel({
       <Card>
         <div style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.06em",
           color: "#94a3b8", textTransform: "uppercase", marginBottom: 10 }}>
-          Recent movements
+          {t("inventory.recentMovements")}
         </div>
         {historyLoading ? (
-          <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>Loading…</p>
+          <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>{t("common.loading")}</p>
         ) : history.length === 0 ? (
-          <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>No movements recorded yet.</p>
+          <p style={{ fontSize: "0.8rem", color: "#94a3b8" }}>{t("inventory.noMovements")}</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {history.slice(0, 8).map(m => (
@@ -803,7 +813,7 @@ function DetailPanel({
                     {m.note ? <span style={{ fontWeight: 400, color: "#9ca3af" }}> · {m.note}</span> : null}
                   </div>
                   <div style={{ fontSize: "0.7rem", color: "#9ca3af" }}>
-                    {formatRelative(m.createdAt)}
+                    {formatRelative(m.createdAt, t("inventory.never"), t("inventory.justNow"))}
                     {m.createdBy ? ` · ${m.createdBy}` : ""}
                   </div>
                 </div>
@@ -841,21 +851,22 @@ function CsvImportPanel({
   onClose: () => void;
   onDownloadTemplate: () => void;
 }) {
+  const { t } = useLanguage();
   return (
     <div className="importOverlay">
       <div className="importPanel">
         <div className="importPanelHeader">
-          <strong>Import inventory from CSV</strong>
+          <strong>{t("inventory.import.title")}</strong>
           <button type="button" className="importPanelClose" onClick={onClose}>✕</button>
         </div>
 
         {!importResult ? (
           <>
             <div className="importInstructions">
-              <p>Required: <code>sku</code>, <code>quantity</code>. Optional: <code>reorder_threshold</code>, <code>store_name</code>.</p>
+              <p>{t("inventory.import.instructions")} <code>sku</code>, <code>quantity</code>. {t("inventory.import.optionalColumns")} <code>reorder_threshold</code>, <code>store_name</code>.</p>
               <button type="button" className="importTemplateBtn" onClick={onDownloadTemplate}>
                 <span className="material-symbols-outlined">download</span>
-                Download template
+                {t("common.downloadTemplate")}
               </button>
             </div>
 
@@ -866,36 +877,36 @@ function CsvImportPanel({
               onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) onFileSelected(f); }}
             >
               <span className="material-symbols-outlined">upload_file</span>
-              {importFile ? <span>{importFile.name}</span> : <span>Drop a CSV file here or click to browse</span>}
+              {importFile ? <span>{importFile.name}</span> : <span>{t("inventory.import.dropZone")}</span>}
             </div>
 
             <input ref={importFileRef} type="file" accept=".csv,text/csv" style={{ display: "none" }}
               onChange={e => { const f = e.target.files?.[0]; if (f) onFileSelected(f); e.target.value = ""; }} />
 
-            {importPreviewing && <p className="importHint">Parsing…</p>}
+            {importPreviewing && <p className="importHint">{t("inventory.import.parsing")}</p>}
             {importError    && <p className="demoError">{importError}</p>}
 
             {importPreview && (
               <>
                 <div className="importSummaryBar">
                   <span className="importSummaryItem importSummaryItem--ok">
-                    {importPreview.preview.filter(r => r.status === "set").length} to set
+                    {importPreview.preview.filter(r => r.status === "set").length} {t("inventory.import.toSet")}
                   </span>
                   {importPreview.preview.filter(r => r.status === "skip").length > 0 && (
                     <span className="importSummaryItem importSummaryItem--skip">
-                      {importPreview.preview.filter(r => r.status === "skip").length} skipped
+                      {importPreview.preview.filter(r => r.status === "skip").length} {t("inventory.import.skipped")}
                     </span>
                   )}
                   {importPreview.errors.length > 0 && (
                     <span className="importSummaryItem importSummaryItem--err">
-                      {importPreview.errors.length} errors
+                      {importPreview.errors.length} {t("inventory.import.errorsFound")}
                     </span>
                   )}
                 </div>
                 {importPreview.errors.length > 0 && (
                   <div className="importErrorList">
                     {importPreview.errors.map(e => (
-                      <p key={e.row} className="importErrorRow">Row {e.row}: {e.error}</p>
+                      <p key={e.row} className="importErrorRow">{t("inventory.import.rowLabel")} {e.row}: {e.error}</p>
                     ))}
                   </div>
                 )}
@@ -903,7 +914,12 @@ function CsvImportPanel({
                   <table className="importTable">
                     <thead>
                       <tr>
-                        <th>SKU</th><th>Product</th><th>Qty</th><th>Reorder</th><th>Store</th><th>Status</th>
+                        <th>{t("inventory.import.colSku")}</th>
+                        <th>{t("inventory.import.colProduct")}</th>
+                        <th>{t("inventory.import.colQty")}</th>
+                        <th>{t("inventory.import.colThreshold")}</th>
+                        <th>{t("inventory.import.colStore")}</th>
+                        <th>{t("inventory.import.colStatus")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -916,7 +932,7 @@ function CsvImportPanel({
                           <td>{row.storeName ?? "—"}</td>
                           <td>
                             <span className={`importStatusBadge importStatusBadge--${row.status === "set" ? "create" : "skip"}`}>
-                              {row.status === "skip" ? "Skip" : "Set"}
+                              {row.status === "skip" ? t("inventory.import.skipLabel") : t("inventory.import.setLabel")}
                             </span>
                           </td>
                         </tr>
@@ -928,10 +944,10 @@ function CsvImportPanel({
                   <button type="button" className="btnPrimary" onClick={onApply}
                     disabled={importApplying || importPreview.preview.filter(r => r.status === "set").length === 0}>
                     {importApplying
-                      ? "Importing…"
-                      : `Import ${importPreview.preview.filter(r => r.status === "set").length} items`}
+                      ? t("inventory.import.importing")
+                      : `${t("inventory.import.confirmBtn")} ${importPreview.preview.filter(r => r.status === "set").length} ${t("inventory.import.itemsLabel")}`}
                   </button>
-                  <button type="button" onClick={onClose}>Cancel</button>
+                  <button type="button" onClick={onClose}>{t("common.cancel")}</button>
                 </div>
               </>
             )}
@@ -939,17 +955,17 @@ function CsvImportPanel({
         ) : (
           <div className="importResultPanel">
             <span className="material-symbols-outlined importResultIcon">check_circle</span>
-            <h3>Import complete</h3>
-            {importResult.updated > 0 && <p><strong>{importResult.updated}</strong> items updated</p>}
-            {importResult.skipped > 0  && <p>{importResult.skipped} skipped (no SKU match)</p>}
+            <h3>{t("inventory.import.doneTitle")}</h3>
+            {importResult.updated > 0 && <p><strong>{importResult.updated}</strong> {t("inventory.import.updated")}</p>}
+            {importResult.skipped > 0  && <p>{importResult.skipped} {t("inventory.import.skipped")}</p>}
             {importResult.errors.length > 0 && (
               <div className="importErrorList">
                 {importResult.errors.map((e, i) => (
-                  <p key={i} className="importErrorRow">Row {e.row}: {e.error}</p>
+                  <p key={i} className="importErrorRow">{t("inventory.import.rowLabel")} {e.row}: {e.error}</p>
                 ))}
               </div>
             )}
-            <button type="button" className="btnPrimary" onClick={onClose}>Done</button>
+            <button type="button" className="btnPrimary" onClick={onClose}>{t("common.done")}</button>
           </div>
         )}
       </div>

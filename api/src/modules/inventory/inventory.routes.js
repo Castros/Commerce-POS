@@ -793,9 +793,9 @@ inventoryRouter.get(
                 p.name AS "currentProductName"
          FROM commerce_inventory_invoice_lines l
          LEFT JOIN commerce_products p ON p.id = l.product_id
-         WHERE l.invoice_id = $1
+         WHERE l.invoice_id = $1 AND l.organization_id = $2
          ORDER BY l.created_at ASC`,
-        [invoiceId]
+        [invoiceId, query.organizationId]
       )
     ]);
 
@@ -895,9 +895,10 @@ inventoryRouter.post(
                 quantity, unit_cost_cents AS "unitCostCents", match_status AS "matchStatus"
          FROM commerce_inventory_invoice_lines
          WHERE invoice_id = $1
+           AND organization_id = $2
            AND match_status != 'skipped'
            AND product_id IS NOT NULL`,
-        [invoiceId]
+        [invoiceId, body.organizationId]
       );
 
       const storeId = invoice.storeId;
@@ -952,8 +953,8 @@ inventoryRouter.post(
       await client.query(
         `UPDATE commerce_inventory_invoices
          SET status = 'approved', approved_by_user_id = $2, approved_at = NOW(), updated_at = NOW()
-         WHERE id = $1`,
-        [invoiceId, actor.actorUserId ?? null]
+         WHERE id = $1 AND organization_id = $3`,
+        [invoiceId, actor.actorUserId ?? null, body.organizationId]
       );
 
       return { invoiceId, appliedLines };

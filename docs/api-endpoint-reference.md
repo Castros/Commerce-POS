@@ -36,15 +36,14 @@ Role permissions currently used by endpoints:
 
 | Role | Permissions |
 | --- | --- |
-| `platform_admin` | all |
-| `organization_owner` | all |
-| `organization_admin` | `organizations:write`, `stores:write`, `products:write`, `customers:write`, `wallets:write`, `orders:write`, `reports:read` |
-| `store_manager` | `products:write`, `customers:write`, `wallets:write`, `orders:write`, `reports:read` |
-| `cashier` | `customers:write`, `wallets:topup`, `orders:write` |
-| `accountant` | `wallets:write`, `orders:read`, `reports:read` |
-| `parent` | `orders:read` |
-| `customer` | `orders:read` |
-| `service` | `organizations:write`, `stores:write`, `products:write`, `customers:write`, `wallets:write`, `wallets:topup`, `orders:write`, `reports:read` |
+| `platform_admin` | all (`*`) |
+| `super_admin` | all (`*`) |
+| `organization_owner` | `organizations:write`, `stores:write`, `products:write`, `customers:write`, `wallets:write`, `orders:write`, `reports:read`, `credentials:write`, `inventory:read`, `inventory:write` |
+| `organization_admin` | `organizations:write`, `stores:write`, `products:write`, `customers:write`, `wallets:write`, `orders:write`, `reports:read`, `credentials:write`, `inventory:read`, `inventory:write` |
+| `store_manager` | `products:write`, `customers:write`, `wallets:write`, `orders:write`, `reports:read`, `credentials:write`, `inventory:read`, `inventory:write` |
+| `cashier` | `customers:write`, `wallets:topup`, `orders:write`, `inventory:read` |
+| `accountant` | `wallets:write`, `orders:read`, `reports:read`, `inventory:read` |
+| `service` | `organizations:write`, `stores:write`, `products:write`, `customers:write`, `wallets:write`, `wallets:topup`, `orders:write`, `reports:read`, `credentials:write`, `inventory:read`, `inventory:write` |
 
 Important notes:
 
@@ -942,6 +941,362 @@ curl -s -X PUT "$API_BASE_URL/staff/$STAFF_ID/category-permissions" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"organizationId\":\"$ORG_ID\",\"categoryIds\":[\"$CAT_ID_1\",\"$CAT_ID_2\"]}"
+```
+
+---
+
+## Inventory Suppliers
+
+### GET /v1/inventory/suppliers
+
+List active suppliers for an organization.
+
+```bash
+curl -s "$API_BASE_URL/inventory/suppliers?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /v1/inventory/suppliers
+
+Create a supplier.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `name` | yes | |
+| `vendorNumber` | no | Internal vendor code |
+| `email` | no | |
+| `phone` | no | |
+| `addressLine1` | no | |
+| `city` | no | |
+| `region` | no | State/province |
+| `postalCode` | no | |
+| `notes` | no | |
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/suppliers" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"name\":\"Sysco Foods\",\"vendorNumber\":\"SYS-001\"}"
+```
+
+### PATCH /v1/inventory/suppliers/:id
+
+Update supplier fields. Same fields as POST; all optional except `organizationId`.
+
+---
+
+## Inventory Invoices
+
+### GET /v1/inventory/invoices
+
+List receiving invoices. Filter by `storeId` and `status` (`draft`, `approved`, `void`).
+
+```bash
+curl -s "$API_BASE_URL/inventory/invoices?organizationId=$ORG_ID&status=draft" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /v1/inventory/invoices
+
+Create a draft receiving invoice.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `storeId` | yes | Receiving location |
+| `supplierId` | no | UUID from suppliers |
+| `invoiceNumber` | no | Supplier's invoice number |
+| `invoiceDate` | no | ISO date |
+| `notes` | no | |
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/invoices" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"storeId\":\"$STORE_ID\",\"invoiceNumber\":\"INV-2024-001\"}"
+```
+
+### GET /v1/inventory/invoices/:id
+
+Get invoice detail including metadata.
+
+### GET /v1/inventory/invoices/:id/lines
+
+Get all line items for an invoice, including `product_name`, `sku`, `quantity_received`, `unit_cost_cents`, `match_status`, and `confidence` (for AI-extracted lines).
+
+### PATCH /v1/inventory/invoices/:id
+
+Update invoice metadata (supplier, invoice number, notes). Cannot update approved invoices.
+
+### POST /v1/inventory/invoices/:id/approve
+
+Approve a draft invoice. This:
+1. Locks each referenced inventory row `FOR UPDATE`
+2. Increments `quantity_on_hand` by the received quantity
+3. Writes an inventory movement record for each line
+4. Marks the invoice `approved`
+
+Requires `inventory:write`.
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/invoices/$INVOICE_ID/approve" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\"}"
+```
+
+---
+
+## Inventory Transfers
+
+### GET /v1/inventory/transfers
+
+List inter-location transfers for an organization.
+
+```bash
+curl -s "$API_BASE_URL/inventory/transfers?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /v1/inventory/transfers
+
+Move stock from one store location to another. Decrements source, increments destination in a single transaction.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `productId` | yes | |
+| `fromStoreId` | yes | |
+| `toStoreId` | yes | Must differ from fromStoreId |
+| `quantity` | yes | Positive integer |
+| `note` | no | Reason for transfer |
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/transfers" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"productId\":\"$PRODUCT_ID\",\"fromStoreId\":\"$STORE_A\",\"toStoreId\":\"$STORE_B\",\"quantity\":10}"
+```
+
+### GET /v1/inventory/transfers/:id
+
+Get a single transfer record.
+
+---
+
+## Inventory History
+
+### GET /v1/inventory/history
+
+Returns a time-ordered list of inventory movements (sales, adjustments, receiving, transfers).
+
+| Parameter | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `storeId` | no | Filter to a specific location |
+| `productId` | no | Filter to a specific product |
+| `dateFrom` | no | ISO date |
+| `dateTo` | no | ISO date |
+
+```bash
+curl -s "$API_BASE_URL/inventory/history?organizationId=$ORG_ID&productId=$PRODUCT_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Inventory Settings
+
+### GET /v1/inventory/settings
+
+Returns per-organization inventory settings (low-stock threshold, reorder behavior).
+
+```bash
+curl -s "$API_BASE_URL/inventory/settings?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### PATCH /v1/inventory/settings
+
+Update inventory settings for the organization.
+
+---
+
+## Wallet Transactions
+
+### GET /v1/wallets/:id/transactions
+
+Returns the ledger history for a wallet, newest first.
+
+| Parameter | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | Tenant isolation |
+| `limit` | no | Default 50 |
+| `offset` | no | Pagination |
+
+```bash
+curl -s "$API_BASE_URL/wallets/$WALLET_ID/transactions?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## AI Inventory Extraction
+
+The AI extraction pipeline accepts an invoice image or PDF, extracts line items using Claude vision/text, performs 3-stage product matching, and saves a draft for manager review. Requires `ANTHROPIC_API_KEY` and `CLOUDINARY_*` env vars.
+
+**Route prefix:** `/v1/inventory/ai` — registered in `routes.js` **before** `/v1/inventory` to prevent Express routing conflicts.
+
+### POST /v1/inventory/ai/extract
+
+Upload an invoice image or PDF for AI extraction. Multipart form data.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `file` | file | JPEG, PNG, WEBP, or PDF; max 20 MB |
+| `organizationId` | text | |
+| `storeId` | text | Optional receiving location |
+| `supplierId` | text | Optional — pre-fill supplier |
+
+Returns the saved draft object with extracted lines and confidence scores.
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/ai/extract" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "organizationId=$ORG_ID" \
+  -F "storeId=$STORE_ID" \
+  -F "file=@invoice.pdf"
+```
+
+**Line `match_status` values:**
+- `matched` — exact SKU or corrections table hit
+- `fuzzy` — pg_trgm similarity match (confidence reflects score)
+- `unmatched` — no match found; manager must select product manually
+- `skipped` — manager marked line as skip during review
+
+### GET /v1/inventory/ai/drafts
+
+List AI extraction drafts.
+
+| Parameter | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `status` | no | `pending`, `approved`, `rejected` |
+
+```bash
+curl -s "$API_BASE_URL/inventory/ai/drafts?organizationId=$ORG_ID&status=pending" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /v1/inventory/ai/drafts/:id
+
+Get a single draft with full lines JSONB.
+
+```bash
+curl -s "$API_BASE_URL/inventory/ai/drafts/$DRAFT_ID?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /v1/inventory/ai/drafts/:id/approve
+
+Approve a draft: creates a `commerce_inventory_invoice`, inserts line items, locks and increments stock, saves product corrections for the learning loop, marks draft `approved`.
+
+Requires manager+ (`inventory:write`). All lines must have `product_id` (not `null`) or `skip: true`.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `lines` | yes | Array of reviewed line objects |
+| `updateCost` | no | `true` → update product `cost_cents` from `unit_cost_cents` |
+
+Each line in `lines`:
+```json
+{
+  "product_id": "<uuid>",
+  "quantity": 24,
+  "unit_cost_cents": 350,
+  "skip": false
+}
+```
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/ai/drafts/$DRAFT_ID/approve" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"lines\":[...],\"updateCost\":false}"
+```
+
+### POST /v1/inventory/ai/drafts/:id/reject
+
+Mark a draft rejected without creating an invoice.
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/ai/drafts/$DRAFT_ID/reject" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\"}"
+```
+
+---
+
+## AI Inventory Corrections (Learning Loop)
+
+Corrections map raw extracted text (from Claude's output) to confirmed products, per organization. They are injected as few-shot hints into every subsequent extraction call, improving match accuracy over time.
+
+### GET /v1/inventory/ai/corrections
+
+List all corrections for the organization. Sorted by `use_count` descending.
+
+```bash
+curl -s "$API_BASE_URL/inventory/ai/corrections?organizationId=$ORG_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Returns:
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "extractedText": "leche entera 1lt lala",
+      "productId": "...",
+      "productName": "Leche Entera 1L",
+      "sku": "LECHE-1L",
+      "useCount": 7,
+      "confirmedByName": "Maria Garcia",
+      "createdAt": "..."
+    }
+  ]
+}
+```
+
+### POST /v1/inventory/ai/corrections
+
+Manually add a correction mapping.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `organizationId` | yes | |
+| `extractedText` | yes | Normalized text to match (lowercased, trimmed) |
+| `productId` | yes | UUID of the product to map to |
+
+```bash
+curl -s -X POST "$API_BASE_URL/inventory/ai/corrections" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\",\"extractedText\":\"leche 1l\",\"productId\":\"$PRODUCT_ID\"}"
+```
+
+### DELETE /v1/inventory/ai/corrections/:id
+
+Delete a correction. Requires `organizationId` in body.
+
+```bash
+curl -s -X DELETE "$API_BASE_URL/inventory/ai/corrections/$CORRECTION_ID" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"organizationId\":\"$ORG_ID\"}"
 ```
 
 ---

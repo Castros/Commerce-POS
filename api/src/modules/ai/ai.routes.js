@@ -194,12 +194,22 @@ aiRouter.patch(
   })
 );
 
-// ── Usage summary (platform admin) ───────────────────────────────────────────
+// ── Usage summary (platform admin only) ──────────────────────────────────────
+
+const PLATFORM_ROLES = new Set(["platform_admin", "super_admin", "service"]);
 
 aiRouter.get(
   "/usage",
-  requirePermission("organizations:write"),
   asyncHandler(async (req, res) => {
+    const actor = getActor(req);
+    if (!PLATFORM_ROLES.has(actor.role)) {
+      // Non-platform users can only query their own org's usage
+      const orgId = req.query.organizationId || actor.organizationId;
+      authorizeTenant(actor, orgId);
+      const rows = await aiRepo.getUsageSummary({ ...req.query, organizationId: orgId });
+      return res.json({ data: rows });
+    }
+
     const query = parseZod(
       z.object({
         organizationId: z.string().uuid().optional(),

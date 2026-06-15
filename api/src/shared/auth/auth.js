@@ -16,7 +16,9 @@ const rolePermissions = {
     "wallets:write",
     "orders:write",
     "reports:read",
-    "credentials:write"
+    "credentials:write",
+    "inventory:read",
+    "inventory:write"
   ],
   store_manager: [
     "products:write",
@@ -24,10 +26,12 @@ const rolePermissions = {
     "wallets:write",
     "orders:write",
     "reports:read",
-    "credentials:write"
+    "credentials:write",
+    "inventory:read",
+    "inventory:write"
   ],
-  cashier: ["customers:write", "wallets:topup", "orders:write"],
-  accountant: ["wallets:write", "orders:read", "reports:read"],
+  cashier: ["customers:write", "wallets:topup", "orders:write", "inventory:read"],
+  accountant: ["wallets:write", "orders:read", "reports:read", "inventory:read"],
   parent: ["orders:read"],
   customer: ["orders:read"],
   service: [
@@ -39,7 +43,9 @@ const rolePermissions = {
     "wallets:topup",
     "orders:write",
     "reports:read",
-    "credentials:write"
+    "credentials:write",
+    "inventory:read",
+    "inventory:write"
   ]
 };
 

@@ -163,6 +163,8 @@ api/test/
   migrations.test.js
   cash-drawers.test.js
   inventory.test.js
+  inventory-ai.test.js         ← AI extraction draft lifecycle, learning loop
+  ai-isolation.test.js         ← cross-org AI draft access, cross-org corrections access
 
 web/test/
   unit/
@@ -289,6 +291,66 @@ Cover:
 - AI records write only to `commerce_ai_records`.
 - AI endpoints never write to financial tables.
 
+### Priority 6: AI Inventory Extraction
+
+Create:
+
+```text
+api/test/inventory-ai.test.js
+```
+
+Cover (mock Claude and Cloudinary — test the pipeline logic):
+
+- `POST /inventory/ai/extract` with a mock image creates a draft with `status: pending`.
+- Draft `lines` JSONB contains extracted lines after matching.
+- 3-stage matching: exact SKU hit sets `match_status: matched`; corrections table hit sets `match_status: matched`; pg_trgm hit sets `match_status: fuzzy`; no match sets `match_status: unmatched`.
+- `POST /drafts/:id/approve` creates an invoice row.
+- Approve increments `quantity_on_hand` for each non-skipped line.
+- Approve writes a `commerce_inventory_movements` row for each line.
+- Approve upserts `commerce_ai_inventory_corrections` for matched lines.
+- `use_count` increments on second approval of same extracted_text.
+- Approve sets draft `status: approved` and `invoice_id`.
+- Reject sets draft `status: rejected` without creating an invoice.
+- Cannot approve an already-approved draft.
+- Cannot approve if any line has `product_id: null` and `skip: false`.
+
+### Priority 7: Multi-Tenant Isolation
+
+Create:
+
+```text
+api/test/ai-isolation.test.js
+```
+
+This test file should verify every cross-org vulnerability identified in the 2026-06-14 security audit.
+
+Cover:
+
+**Guardian isolation:**
+- `POST /guardians/:id/students` rejects link when guardian belongs to a different organization than the request `organizationId`.
+- `POST /guardians/:id/students` rejects link when student belongs to a different organization than the request `organizationId`.
+- Guardian cannot view students from another organization.
+
+**Staff isolation:**
+- `PATCH /staff/:id` cannot update a staff member from another organization.
+- `POST /staff/:id/pin` cannot reset PIN for staff from another organization.
+
+**Inventory invoice isolation:**
+- `GET /inventory/invoices/:id/lines` returns 404 for an invoice belonging to another organization.
+- `POST /inventory/invoices/:id/approve` rejects approval of another org's invoice.
+
+**AI extraction isolation:**
+- `GET /inventory/ai/drafts/:id` returns 404 for a draft belonging to another organization.
+- `POST /inventory/ai/drafts/:id/approve` rejects approval of another org's draft.
+- `DELETE /inventory/ai/corrections/:id` rejects deletion of another org's correction.
+
+**AI usage isolation:**
+- Non-platform roles (`organization_admin`, `store_manager`) can only see their own org's AI usage.
+- Platform roles (`platform_admin`, `super_admin`) can see cross-org usage.
+
+**Defense-in-depth verification:**
+- All of the above must fail even when the `organizationId` body/query param is *changed* to the attacker's own org — proving SQL-level `AND organization_id = $N` independently blocks the attack.
+
 ## CI Gates
 
 Update `.github/workflows/ci.yml` in stages.
@@ -408,3 +470,22 @@ Before demoing:
 - Rich demo data is seeded into a disposable demo database.
 - Register, orders, payments, inventory, customers, guardians, staff, and reports load.
 - AI features are tested only against demo data and write only to `commerce_ai_records`.
+- AI inventory extraction tested with a real supplier invoice image or PDF in Docker.
+- AI corrections visible in the "AI Learning" tab after approving an extraction draft.
+
+## Multi-Tenant Security Rules
+
+These rules must never regress. Any backend change touching the modules below must re-verify isolation:
+
+| Module | Files | What to verify |
+| --- | --- | --- |
+| Guardians | `guardians.routes.js` | Guardian and student both verified in org before link INSERT |
+| Staff | `staff.routes.js` | PATCH and PIN reset include `AND organization_id` in WHERE |
+| Inventory invoices | `inventory.routes.js` | Lines query and approve query include `AND organization_id` |
+| AI drafts | `inventoryAI.routes.js` | Draft approve final UPDATE includes `AND organization_id` |
+| AI usage | `ai.routes.js` | Non-platform roles forced into own org; `authorizeTenant` called |
+| All list endpoints | any `.routes.js` | `WHERE organization_id = $N` in every query — never rely on `authorizeTenant` alone |
+
+**Defense-in-depth rule:** `authorizeTenant(actor, orgId)` at the handler level is Layer 1. `AND organization_id = $N` in the SQL query is Layer 2. Both must exist independently. An attacker who manipulates the `organizationId` parameter after passing Layer 1 must still fail at Layer 2.
+
+See full audit: `docs/multi-tenant-isolation-audit-2026-06-14.md`
