@@ -148,8 +148,9 @@ customersRouter.post(
     const result = await pool.query(
       `INSERT INTO commerce_customers
          (organization_id, external_student_id, external_parent_id, external_id,
-          home_store_id, name, first_name, middle_name, last_name_1, last_name_2, email, phone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          home_store_id, name, first_name, middle_name, last_name_1, last_name_2,
+          email, phone, family_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (organization_id, external_id)
          WHERE external_id IS NOT NULL
          DO UPDATE SET name          = EXCLUDED.name,
@@ -159,7 +160,8 @@ customersRouter.post(
                        last_name_2   = COALESCE(EXCLUDED.last_name_2, commerce_customers.last_name_2),
                        email         = COALESCE(EXCLUDED.email, commerce_customers.email),
                        phone         = COALESCE(EXCLUDED.phone, commerce_customers.phone),
-                       home_store_id = COALESCE(EXCLUDED.home_store_id, commerce_customers.home_store_id)
+                       home_store_id = COALESCE(EXCLUDED.home_store_id, commerce_customers.home_store_id),
+                       family_code   = COALESCE(EXCLUDED.family_code, commerce_customers.family_code)
        RETURNING id, organization_id AS "organizationId",
                  customer_type AS "customerType",
                  external_student_id AS "externalStudentId",
@@ -181,11 +183,29 @@ customersRouter.post(
         body.middleName || null,
         body.lastName1  || null,
         body.lastName2  || null,
-        body.email || null,
-        body.phone || null
+        body.email      || null,
+        body.phone      || null,
+        body.familyCode || null
       ]
     );
-    res.status(201).json({ data: result.rows[0] });
+
+    const customer = result.rows[0];
+    // Auto-link any guardians that share the new family_code
+    if (customer.familyCode && customer.customerType === "student") {
+      await pool.query(
+        `INSERT INTO commerce_guardian_students
+           (guardian_id, student_id, organization_id, relationship)
+         SELECT g.id, $1, $2, 'guardian'
+         FROM commerce_guardians g
+         WHERE g.organization_id = $2
+           AND g.family_code     = $3
+           AND g.active          = TRUE
+         ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+        [customer.id, body.organizationId, customer.familyCode]
+      );
+    }
+
+    res.status(201).json({ data: customer });
   })
 );
 
@@ -429,14 +449,30 @@ customersRouter.post(
                            email       = COALESCE(EXCLUDED.email,       commerce_customers.email),
                            phone       = COALESCE(EXCLUDED.phone,       commerce_customers.phone),
                            family_code = COALESCE(EXCLUDED.family_code, commerce_customers.family_code)
-             RETURNING (xmax = 0) AS inserted`,
+             RETURNING id, (xmax = 0) AS inserted`,
             [
               organizationId, fullName,
               r.first_name || null, r.middle_name || null, r.last_name_1 || null, r.last_name_2 || null,
               r.email || null, r.phone || null, r.external_id || null, r.family_code || null
             ]
           );
+          const customerId = result.rows[0]?.id;
           if (result.rows[0]?.inserted) created++; else updated++;
+
+          // Auto-link any guardians that share the same family_code
+          if (customerId && r.family_code) {
+            await client.query(
+              `INSERT INTO commerce_guardian_students
+                 (guardian_id, student_id, organization_id, relationship)
+               SELECT g.id, $1, $2, 'guardian'
+               FROM commerce_guardians g
+               WHERE g.organization_id = $2
+                 AND g.family_code     = $3
+                 AND g.active          = TRUE
+               ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+              [customerId, organizationId, r.family_code]
+            );
+          }
         } catch (err) {
           errors.push({ row: i + 2, name: fullName, error: err.message });
         }

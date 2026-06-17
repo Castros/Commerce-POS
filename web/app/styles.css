@@ -5600,6 +5600,31 @@ dd {
 .parentLoginCard h1 { font-size: 1.25rem; margin: 0 0 4px; }
 .parentLoginCard .subtitle { font-size: 0.875rem; color: #6b7280; margin: 0 0 24px; }
 
+.parentFieldLabel {
+  display: block;
+  font-size: 0.875rem;
+  color: #374151;
+  margin-bottom: 6px;
+}
+
+.parentPasswordRules {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.parentPasswordRules li {
+  font-size: 0.8rem;
+  color: #ef4444;
+  padding-left: 20px;
+  position: relative;
+}
+.parentPasswordRules li::before { content: "✕"; position: absolute; left: 0; }
+.parentPasswordRules li.met { color: #16a34a; }
+.parentPasswordRules li.met::before { content: "✓"; }
+
 .parentEmailInput {
   width: 100%;
   border: 1.5px solid #e5e7eb;

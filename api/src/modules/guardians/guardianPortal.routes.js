@@ -12,6 +12,8 @@ import {
   serializeGuardianSessionCookie,
   clearGuardianSessionCookie,
   requireGuardianSession,
+  hashGuardianPassword,
+  verifyGuardianPassword,
   GUARDIAN_SESSION_TTL_SECONDS
 } from "./guardianAuth.js";
 
@@ -199,6 +201,83 @@ guardianPortalRouter.post(
         organizationId: row.organizationId
       }
     });
+  })
+);
+
+// ── Auth: password login ─────────────────────────────────────────────────────
+
+guardianPortalRouter.post(
+  "/auth/login",
+  asyncHandler(async (req, res) => {
+    const body = z.object({
+      organizationId: z.string().uuid(),
+      email:          z.string().email(),
+      password:       z.string().min(1)
+    }).parse(req.body);
+
+    const result = await pool.query(
+      `SELECT id AS "guardianId", organization_id AS "organizationId",
+              name, email, password_hash AS "passwordHash"
+       FROM commerce_guardians
+       WHERE organization_id = $1 AND email = $2 AND active = TRUE`,
+      [body.organizationId, body.email.toLowerCase()]
+    );
+    const guardian = result.rows[0];
+
+    const valid = guardian?.passwordHash
+      ? await verifyGuardianPassword(body.password, guardian.passwordHash)
+      : false;
+
+    if (!valid) {
+      res.status(401).json({ error: "Correo o contraseña incorrectos" });
+      return;
+    }
+
+    const sessionToken     = generateSessionToken();
+    const sessionTokenHash = hashToken(sessionToken);
+    const expiresAt        = new Date(Date.now() + GUARDIAN_SESSION_TTL_SECONDS * 1000);
+
+    await pool.query(
+      `INSERT INTO commerce_guardian_sessions
+         (guardian_id, organization_id, session_token_hash, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [guardian.guardianId, guardian.organizationId, sessionTokenHash, expiresAt]
+    );
+
+    res.setHeader("Set-Cookie", serializeGuardianSessionCookie(sessionToken, {
+      maxAge: GUARDIAN_SESSION_TTL_SECONDS
+    }));
+    res.json({
+      data: {
+        name:           guardian.name,
+        email:          guardian.email,
+        organizationId: guardian.organizationId
+      }
+    });
+  })
+);
+
+// ── Auth: set password (requires active session, called after OTP verify) ────
+
+guardianPortalRouter.post(
+  "/auth/set-password",
+  requireGuardianSession,
+  asyncHandler(async (req, res) => {
+    const { guardianId, organizationId } = req.guardian;
+    const { password } = z.object({
+      password: z.string()
+        .min(8, "La contraseña debe tener al menos 8 caracteres")
+        .regex(/[A-Z]/, "Debe incluir al menos una letra mayúscula")
+        .regex(/[0-9]/, "Debe incluir al menos un número")
+    }).parse(req.body);
+
+    const hash = await hashGuardianPassword(password);
+    await pool.query(
+      `UPDATE commerce_guardians SET password_hash = $1 WHERE id = $2 AND organization_id = $3`,
+      [hash, guardianId, organizationId]
+    );
+
+    res.json({ data: { ok: true } });
   })
 );
 

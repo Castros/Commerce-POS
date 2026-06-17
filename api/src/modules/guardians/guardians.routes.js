@@ -207,6 +207,22 @@ guardiansRouter.patch(
       vals
     );
 
+    // Auto-link students that share the new family_code
+    if (body.familyCode) {
+      await pool.query(
+        `INSERT INTO commerce_guardian_students
+           (guardian_id, student_id, organization_id, relationship)
+         SELECT $1, c.id, $2, 'guardian'
+         FROM commerce_customers c
+         WHERE c.organization_id = $2
+           AND c.family_code     = $3
+           AND c.customer_type   = 'student'
+           AND c.active          = TRUE
+         ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+        [guardianId, body.organizationId, body.familyCode]
+      );
+    }
+
     const full = await pool.query(
       `${GUARDIAN_SELECT} WHERE g.id = $2 AND g.organization_id = $1 GROUP BY g.id`,
       [body.organizationId, guardianId]

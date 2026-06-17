@@ -1,7 +1,30 @@
 import crypto from "node:crypto";
+import { promisify } from "node:util";
 import { pool } from "../../db/client.js";
 import { parseCookies } from "../../shared/auth/browserAuth.js";
 import { unauthorized } from "../../shared/http/errors.js";
+
+const pbkdf2Async = promisify(crypto.pbkdf2);
+const PASS_ITERATIONS = 100000;
+const PASS_KEY_LENGTH = 32;
+const PASS_DIGEST    = "sha256";
+const PASS_SALT_LEN  = 16;
+
+export async function hashGuardianPassword(password) {
+  const salt = crypto.randomBytes(PASS_SALT_LEN).toString("hex");
+  const key  = await pbkdf2Async(password, salt, PASS_ITERATIONS, PASS_KEY_LENGTH, PASS_DIGEST);
+  return `${salt}:${key.toString("hex")}`;
+}
+
+export async function verifyGuardianPassword(password, stored) {
+  const [salt, expected] = stored.split(":");
+  const key = await pbkdf2Async(password, salt, PASS_ITERATIONS, PASS_KEY_LENGTH, PASS_DIGEST);
+  const keyHex      = key.toString("hex");
+  const expectedBuf = Buffer.from(expected, "hex");
+  const actualBuf   = Buffer.from(keyHex,   "hex");
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, actualBuf);
+}
 
 export const GUARDIAN_SESSION_COOKIE = "guardian_portal_session";
 export const GUARDIAN_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
