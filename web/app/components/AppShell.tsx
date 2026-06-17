@@ -117,7 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (publicPaths.has(pathname)) return;
+    if (publicPaths.has(pathname) || pathname.startsWith("/parent")) return;
     let cancelled = false;
     apiGet<CurrentSession>("/auth/me")
       .then((s) => { if (!cancelled) setSession(s); })
