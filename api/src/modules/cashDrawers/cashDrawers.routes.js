@@ -235,6 +235,13 @@ cashDrawersRouter.post(
     const actor = getActor(req);
     authorizeTenant(actor, body.organizationId);
 
+    const drawerRow = await pool.query(
+      `SELECT store_id FROM commerce_cash_drawer_sessions WHERE organization_id = $1 AND id = $2`,
+      [body.organizationId, sessionId]
+    );
+    if (!drawerRow.rows[0]) throw notFound("Cash drawer not found");
+    await authorizeStore(actor, body.organizationId, drawerRow.rows[0].store_id);
+
     const result = await withTransaction(async (client) => {
       const current = (
         await client.query(

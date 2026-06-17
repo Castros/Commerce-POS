@@ -247,6 +247,17 @@ ordersRouter.post(
     const body = parseZod(refundOrderSchema, req.body);
     const actor = getActor(req);
     authorizeTenant(actor, body.organizationId);
+
+    const orderRow = await pool.query(
+      `SELECT store_id FROM commerce_orders WHERE organization_id = $1 AND id = $2`,
+      [body.organizationId, req.params.id]
+    );
+    if (!orderRow.rows[0]) {
+      res.status(404).json({ error: "Order not found" });
+      return;
+    }
+    await authorizeStore(actor, body.organizationId, orderRow.rows[0].store_id);
+
     const result = await refundOrder({
       body: {
         ...body,
@@ -276,6 +287,17 @@ ordersRouter.post(
     const body = parseZod(partialRefundSchema, req.body);
     const actor = getActor(req);
     authorizeTenant(actor, body.organizationId);
+
+    const orderRow = await pool.query(
+      `SELECT store_id FROM commerce_orders WHERE organization_id = $1 AND id = $2`,
+      [body.organizationId, req.params.id]
+    );
+    if (!orderRow.rows[0]) {
+      res.status(404).json({ error: "Order not found" });
+      return;
+    }
+    await authorizeStore(actor, body.organizationId, orderRow.rows[0].store_id);
+
     const result = await partialRefundOrder({
       body: { ...body, orderId: req.params.id },
       idempotencyKey,

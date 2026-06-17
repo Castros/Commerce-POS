@@ -350,6 +350,80 @@ guardianPortalRouter.patch(
   })
 );
 
+// ── Student spending controls ─────────────────────────────────────────────────
+
+guardianPortalRouter.get(
+  "/students/:studentId/spending-controls",
+  requireGuardianSession,
+  asyncHandler(async (req, res) => {
+    const studentId = z.string().uuid().parse(req.params.studentId);
+    const { guardianId, organizationId } = req.guardian;
+
+    const gsResult = await pool.query(
+      `SELECT spending_controls AS "spendingControls"
+       FROM commerce_guardian_students
+       WHERE guardian_id = $1 AND student_id = $2 AND organization_id = $3`,
+      [guardianId, studentId, organizationId]
+    );
+    if (gsResult.rowCount === 0) throw notFound("Student not found");
+
+    const categoriesResult = await pool.query(
+      `SELECT id, name FROM commerce_product_categories
+       WHERE organization_id = $1 AND active = TRUE
+       ORDER BY name ASC`,
+      [organizationId]
+    );
+
+    res.json({
+      data: {
+        spendingControls: gsResult.rows[0].spendingControls,
+        availableCategories: categoriesResult.rows
+      }
+    });
+  })
+);
+
+guardianPortalRouter.patch(
+  "/students/:studentId/spending-controls",
+  requireGuardianSession,
+  asyncHandler(async (req, res) => {
+    const studentId = z.string().uuid().parse(req.params.studentId);
+    const { guardianId, organizationId } = req.guardian;
+
+    const body = z.object({
+      dailyLimitCents: z.number().int().min(0).nullable().optional(),
+      blockedCategoryIds: z.array(z.string().uuid()).optional()
+    }).parse(req.body);
+
+    const gsCheck = await pool.query(
+      `SELECT id FROM commerce_guardian_students
+       WHERE guardian_id = $1 AND student_id = $2 AND organization_id = $3`,
+      [guardianId, studentId, organizationId]
+    );
+    if (gsCheck.rowCount === 0) throw notFound("Student not found");
+
+    const current = (await pool.query(
+      `SELECT spending_controls FROM commerce_guardian_students WHERE id = $1`,
+      [gsCheck.rows[0].id]
+    )).rows[0].spending_controls;
+
+    const updated = {
+      daily_limit_cents: body.dailyLimitCents !== undefined ? body.dailyLimitCents : current.daily_limit_cents,
+      blocked_category_ids: body.blockedCategoryIds !== undefined ? body.blockedCategoryIds : current.blocked_category_ids
+    };
+
+    const result = await pool.query(
+      `UPDATE commerce_guardian_students
+       SET spending_controls = $2
+       WHERE id = $1
+       RETURNING spending_controls AS "spendingControls"`,
+      [gsCheck.rows[0].id, JSON.stringify(updated)]
+    );
+
+    res.json({ data: { spendingControls: result.rows[0].spendingControls } });
+  })
+);
+
 // ── Student transaction history ───────────────────────────────────────────────
 
 guardianPortalRouter.get(
@@ -361,7 +435,8 @@ guardianPortalRouter.get(
     const limit = Math.min(Number(req.query.limit) || 50, 100);
 
     const access = await pool.query(
-      `SELECT 1 FROM commerce_guardian_students
+      `SELECT spending_controls AS "spendingControls"
+       FROM commerce_guardian_students
        WHERE guardian_id = $1 AND student_id = $2 AND organization_id = $3`,
       [guardianId, studentId, organizationId]
     );
@@ -412,7 +487,8 @@ guardianPortalRouter.get(
     res.json({
       data: {
         student: studentResult.rows[0],
-        transactions: txResult.rows
+        transactions: txResult.rows,
+        spendingControls: access.rows[0].spendingControls
       }
     });
   })

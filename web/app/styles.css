@@ -5713,6 +5713,133 @@ dd {
   margin-bottom: 12px;
 }
 
+/* ── Spending Controls Card ──────────────────────────────────────────────── */
+.parentControlsCard {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.parentControlsHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.parentControlsHeader .material-symbols-outlined { font-size: 20px; color: #0f766e; }
+.parentControlsHeader h3 { margin: 0; font-size: 0.9rem; font-weight: 600; color: #111827; flex: 1; }
+.parentControlsHeader .chevron { font-size: 18px; color: #9ca3af; transition: transform 0.15s; }
+.parentControlsHeader .chevron.open { transform: rotate(180deg); }
+
+.parentControlsBody { padding: 0 16px 16px; }
+
+.parentControlsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
+  gap: 12px;
+}
+.parentControlsRow:last-child { border-bottom: none; }
+.parentControlsRow label { font-size: 0.875rem; color: #374151; font-weight: 500; flex: 1; }
+.parentControlsRow p { margin: 2px 0 0; font-size: 0.75rem; color: #9ca3af; }
+
+.parentToggle {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.parentToggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.parentToggleSlider {
+  position: absolute;
+  inset: 0;
+  background: #d1d5db;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.parentToggleSlider::before {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.parentToggle input:checked + .parentToggleSlider { background: #0f766e; }
+.parentToggle input:checked + .parentToggleSlider::before { transform: translateX(20px); }
+
+.parentAmountInput {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.parentAmountInput span { font-size: 0.875rem; color: #6b7280; }
+.parentAmountInput input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #111827;
+  outline: none;
+  min-width: 0;
+}
+
+.parentCategoryList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.parentCategoryChip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1.5px solid #e5e7eb;
+  background: #f9fafb;
+  font-size: 0.8rem;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.parentCategoryChip.blocked {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+.parentCategoryChip .material-symbols-outlined { font-size: 14px; }
+
+.parentSaveBtn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px;
+  background: #0f766e;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.parentSaveBtn:hover:not(:disabled) { background: #0d6960; }
+.parentSaveBtn:disabled { background: #94a3b8; cursor: default; }
+.parentSaveSuccess { font-size: 0.8rem; color: #059669; text-align: center; margin-top: 8px; }
+
 /* ── Avatar Upload Component ─────────────────────────────────────────────── */
 .avatarUploadWrap {
   display: inline-flex;

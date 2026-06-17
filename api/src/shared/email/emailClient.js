@@ -58,7 +58,7 @@ export async function sendEmail({ to, subject, html, replyTo }) {
   const resend = getClient();
   if (!resend) {
     console.warn(`[email] Skipped (no RESEND_API_KEY): ${subject} → ${to}`);
-    return;
+    return { ok: false, reason: "RESEND_API_KEY is not configured" };
   }
   try {
     const { error } = await resend.emails.send({
@@ -68,9 +68,14 @@ export async function sendEmail({ to, subject, html, replyTo }) {
       html,
       ...(replyTo ? { reply_to: replyTo } : {})
     });
-    if (error) console.error(`[email] Resend error:`, error);
-    else console.info(`[email] Sent: ${subject} → ${to}`);
+    if (error) {
+      console.error(`[email] Resend error:`, error);
+      return { ok: false, reason: error.message ?? JSON.stringify(error) };
+    }
+    console.info(`[email] Sent: ${subject} → ${to}`);
+    return { ok: true };
   } catch (err) {
     console.error(`[email] Failed to send:`, err.message);
+    return { ok: false, reason: err.message };
   }
 }

@@ -1,7 +1,7 @@
 import { withTransaction } from "../../db/transaction.js";
 import { insertAuditEvent } from "../../shared/audit/audit.js";
 import { loadActorCategoryRestrictions } from "../../shared/auth/auth.js";
-import { sendReceiptEmail } from "../../shared/email/receiptEmail.js";
+import { sendReceiptEmail, sendLowBalanceAlert } from "../../shared/email/receiptEmail.js";
 import { badRequest, conflict, notFound, paymentRequired } from "../../shared/http/errors.js";
 import {
   hashRequestBody,
@@ -290,6 +290,51 @@ async function recordCashDrawerSale(client, { body, orderId, totalCents, actorUs
   };
 }
 
+async function enforceSpendingControls(client, { organizationId, customerId, productIds, totalCents }) {
+  const controlsResult = await client.query(
+    `SELECT spending_controls FROM commerce_guardian_students
+     WHERE student_id = $1 AND organization_id = $2`,
+    [customerId, organizationId]
+  );
+  if (controlsResult.rowCount === 0) return;
+
+  const controls = controlsResult.rows.map((r) => r.spending_controls);
+
+  // Blocked categories: union of all guardians' blocked lists
+  const blockedIds = new Set(controls.flatMap((c) => c.blocked_category_ids || []));
+  if (blockedIds.size > 0) {
+    const catResult = await client.query(
+      `SELECT id, category_id, name FROM commerce_products WHERE id = ANY($1::uuid[])`,
+      [productIds]
+    );
+    for (const p of catResult.rows) {
+      if (p.category_id && blockedIds.has(p.category_id)) {
+        throw badRequest(`"${p.name}" está en una categoría restringida por el tutor`);
+      }
+    }
+  }
+
+  // Daily limit: apply the most restrictive non-null limit
+  const limits = controls.map((c) => c.daily_limit_cents).filter((v) => v != null && v > 0);
+  if (limits.length > 0) {
+    const limit = Math.min(...limits);
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const spentResult = await client.query(
+      `SELECT COALESCE(SUM(total_cents), 0) AS spent
+       FROM commerce_orders
+       WHERE customer_id = $1 AND organization_id = $2
+         AND created_at >= $3
+         AND status NOT IN ('refunded', 'voided')`,
+      [customerId, organizationId, dayStart.toISOString()]
+    );
+    const spentToday = Number(spentResult.rows[0].spent);
+    if (spentToday + totalCents > limit) {
+      throw badRequest(`Límite de gasto diario alcanzado`);
+    }
+  }
+}
+
 async function insertPaidOrder(client, { body, items, subtotalCents, actorUserId }) {
   const taxCents = 0;
   const discountCents = 0;
@@ -409,6 +454,16 @@ export async function createPaidSale({
       body.organizationId, actorUserId, null
     );
     const { items, subtotalCents } = await loadStoreAndItems(client, body, allowedCategoryIds);
+
+    if (body.customerId) {
+      await enforceSpendingControls(client, {
+        organizationId: body.organizationId,
+        customerId: body.customerId,
+        productIds: body.items.map((i) => i.productId),
+        totalCents: subtotalCents
+      });
+    }
+
     const { order, createdItems, payment, totalCents } = await insertPaidOrder(client, {
       body,
       items,
@@ -599,6 +654,13 @@ export async function createWalletSale({
       throw paymentRequired("Insufficient wallet balance");
     }
 
+    await enforceSpendingControls(client, {
+      organizationId: body.organizationId,
+      customerId: body.customerId,
+      productIds: body.items.map((i) => i.productId),
+      totalCents
+    });
+
     const balanceAfter = currentBalance - totalCents;
 
     const orderResult = await client.query(
@@ -772,6 +834,12 @@ export async function createWalletSale({
         items: receipt.items,
         payment: receipt.payment,
         wallet: receipt.wallet
+      });
+      void sendLowBalanceAlert({
+        organizationId: body.organizationId,
+        customerId: body.customerId,
+        balanceBeforeCents: currentBalance,
+        balanceAfterCents: balanceAfter
       });
     });
 

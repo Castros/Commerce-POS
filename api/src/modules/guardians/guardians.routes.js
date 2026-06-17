@@ -312,10 +312,15 @@ guardiansRouter.post(
     const appUrl = process.env.APP_URL || "http://localhost:3100";
     const inviteUrl = `${appUrl}/parent/login?org=${organizationId}&invite=${token}`;
 
-    await sendEmail({
+    const result = await sendEmail({
       to: g.email,
       ...buildInviteEmail({ guardianName: g.name, orgName, inviteUrl, studentNames })
     });
+
+    if (!result.ok) {
+      res.status(502).json({ error: `Invite link created but email failed to send: ${result.reason}` });
+      return;
+    }
 
     res.json({ data: { sent: true, to: g.email } });
   })
