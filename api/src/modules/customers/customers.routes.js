@@ -250,7 +250,24 @@ customersRouter.patch(
       vals
     );
     if (result.rowCount === 0) throw notFound("Customer not found");
-    res.json({ data: result.rows[0] });
+
+    // Auto-link any guardians that share the new family_code
+    const customer = result.rows[0];
+    if (body.familyCode && customer.customerType === "student") {
+      await pool.query(
+        `INSERT INTO commerce_guardian_students
+           (guardian_id, student_id, organization_id, relationship)
+         SELECT g.id, $1, $2, 'guardian'
+         FROM commerce_guardians g
+         WHERE g.organization_id = $2
+           AND g.family_code     = $3
+           AND g.active          = TRUE
+         ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+        [customerId, body.organizationId, body.familyCode]
+      );
+    }
+
+    res.json({ data: customer });
   })
 );
 
