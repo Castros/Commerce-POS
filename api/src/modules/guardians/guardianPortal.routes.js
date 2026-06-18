@@ -323,6 +323,7 @@ guardianPortalRouter.get(
     const studentsResult = await pool.query(
       `SELECT c.id, c.name, c.active,
               c.avatar_public_id                 AS "avatarPublicId",
+              c.home_store_id                    AS "homeStoreId",
               gs.relationship,
               gs.is_primary                      AS "isPrimary",
               COALESCE(w.balance_cents, 0)        AS "balanceCents",
@@ -570,5 +571,31 @@ guardianPortalRouter.get(
         spendingControls: access.rows[0].spendingControls
       }
     });
+  })
+);
+
+// ── Published menu (no auth required — parents can bookmark directly) ─────────
+
+guardianPortalRouter.get(
+  "/menu",
+  asyncHandler(async (req, res) => {
+    const { organizationId, storeId, from, to } = z.object({
+      organizationId: z.string().uuid(),
+      storeId:        z.string().uuid(),
+      from:           z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to:             z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+    }).parse(req.query);
+
+    const result = await pool.query(
+      `SELECT date::text, meal_period AS "mealPeriod", items, notes
+       FROM commerce_menu_calendar
+       WHERE organization_id = $1 AND store_id = $2
+         AND date BETWEEN $3 AND $4
+         AND published = TRUE
+       ORDER BY date ASC, meal_period ASC`,
+      [organizationId, storeId, from, to]
+    );
+
+    res.json({ data: result.rows });
   })
 );

@@ -26,6 +26,7 @@ import { storesRouter } from "./modules/stores/stores.routes.js";
 import { studentCredentialsRouter } from "./modules/studentCredentials/studentCredentials.routes.js";
 import { walletsRouter } from "./modules/wallets/wallets.routes.js";
 import { transactionsRouter } from "./modules/transactions/transactions.routes.js";
+import { menuRouter } from "./modules/menu/menu.routes.js";
 import { authenticateRequest } from "./shared/auth/auth.js";
 import { requireFeature } from "./shared/auth/featureGate.js";
 
@@ -57,5 +58,6 @@ apiRouter.use("/ai", aiRouter);
 apiRouter.use("/employees", requireFeature("payroll"), employeesRouter);
 apiRouter.use("/payroll", requireFeature("payroll"), payrollRouter);
 apiRouter.use("/guardians", requireFeature("guardians"), guardiansRouter);
+apiRouter.use("/menu", menuRouter);
 apiRouter.use("/uploads", uploadsRouter);
 apiRouter.use("/transactions", transactionsRouter);

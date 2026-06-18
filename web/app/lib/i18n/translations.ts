@@ -17,7 +17,8 @@ const en = {
     settings: "Settings",
     fees: "Fees",
     guardians: "Parents / Guardians",
-    transactions: "Transactions"
+    transactions: "Transactions",
+    menu: "Menu Calendar"
   },
   shell: {
     orgWorkspace: "Organization workspace",
@@ -459,7 +460,8 @@ const es: typeof en = {
     settings: "Configuración",
     fees: "Cobros",
     guardians: "Padres / Tutores",
-    transactions: "Transacciones"
+    transactions: "Transacciones",
+    menu: "Menú Semanal"
   },
   shell: {
     orgWorkspace: "Espacio de trabajo",

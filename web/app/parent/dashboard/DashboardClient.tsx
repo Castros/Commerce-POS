@@ -24,12 +24,20 @@ type Student = {
   id: string;
   name: string;
   avatarPublicId: string | null;
+  homeStoreId: string | null;
   balanceCents: number;
   currency: string;
   creditLimitCents: number;
   relationship: string;
   isPrimary: boolean;
   recentTransactions: Transaction[];
+};
+
+type MenuDay = {
+  date: string;
+  mealPeriod: string;
+  items: { productId: string; name: string; priceCents: number }[];
+  notes: string | null;
 };
 
 type NotificationPrefs = {
@@ -101,6 +109,20 @@ export default function DashboardClient() {
   const [data, setData] = useState<GuardianMe | null>(null);
   const [error, setError] = useState("");
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [menuDays, setMenuDays] = useState<MenuDay[]>([]);
+  const [menuWeekOffset, setMenuWeekOffset] = useState(0);
+
+  function getWeekBounds(offset: number) {
+    const today = new Date();
+    const day = today.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diff + offset * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 4);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    return { from: fmt(monday), to: fmt(sunday), label: fmt(monday) };
+  }
 
   useEffect(() => {
     fetch("/api/v1/guardian-portal/me", { credentials: "include" })
@@ -117,6 +139,18 @@ export default function DashboardClient() {
       })
       .catch(() => setError("Error de conexión"));
   }, [orgId, router]);
+
+  // Fetch menu when data or week changes
+  useEffect(() => {
+    if (!data) return;
+    const storeId = data.students.find((s) => s.homeStoreId)?.homeStoreId;
+    if (!storeId) return;
+    const { from, to } = getWeekBounds(menuWeekOffset);
+    fetch(`/api/v1/guardian-portal/menu?organizationId=${data.organizationId}&storeId=${storeId}&from=${from}&to=${to}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((p) => { if (p.data) setMenuDays(p.data); })
+      .catch(() => {});
+  }, [data, menuWeekOffset]);
 
   async function toggleEmailOnPurchase() {
     if (!data) return;
@@ -254,6 +288,55 @@ export default function DashboardClient() {
                     </div>
                   </div>
                 ))}
+              </>
+            )}
+
+            {/* ── Weekly menu ── */}
+            {data.students.some((s) => s.homeStoreId) && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 24, marginBottom: 8 }}>
+                  <p className="parentSectionTitle" style={{ margin: 0 }}>Menú de la semana</p>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button type="button" className="parentWeekNav" onClick={() => setMenuWeekOffset((o) => o - 1)}>‹</button>
+                    {menuWeekOffset !== 0 && (
+                      <button type="button" className="parentWeekNav" onClick={() => setMenuWeekOffset(0)}>Hoy</button>
+                    )}
+                    <button type="button" className="parentWeekNav" onClick={() => setMenuWeekOffset((o) => o + 1)}>›</button>
+                  </div>
+                </div>
+                {menuDays.length === 0 ? (
+                  <div className="parentMenuEmpty">Sin menú publicado para esta semana</div>
+                ) : (
+                  <div className="parentMenuGrid">
+                    {/* Group rows by date */}
+                    {Array.from(new Set(menuDays.map((r) => r.date))).map((date) => {
+                      const d = new Date(date + "T12:00:00");
+                      const dayLabel = d.toLocaleDateString("es-MX", { weekday: "short", day: "numeric" });
+                      const dayRows = menuDays.filter((r) => r.date === date);
+                      return (
+                        <div key={date} className="parentMenuDay">
+                          <div className="parentMenuDayLabel">{dayLabel}</div>
+                          {dayRows.map((row) => (
+                            <div key={row.mealPeriod}>
+                              {dayRows.length > 1 && (
+                                <div className="parentMenuNote" style={{ fontWeight: 600, fontStyle: "normal", marginTop: 6 }}>
+                                  {row.mealPeriod}
+                                </div>
+                              )}
+                              {row.notes && <div className="parentMenuNote">{row.notes}</div>}
+                              {row.items.map((item) => (
+                                <div key={item.productId} className="parentMenuItem">
+                                  <span>{item.name}</span>
+                                  <span>${(item.priceCents / 100).toFixed(2)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
             )}
 
