@@ -527,12 +527,14 @@ export function CustomersClient() {
     if (filterStore) list = list.filter((s) => s.homeStoreId === filterStore);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
+      console.log("[search] q=", q, "sample familyCodes=", students.slice(0, 3).map(s => s.familyCode));
       list = list.filter(
         (s) =>
           s.name?.toLowerCase().includes(q) ||
           s.externalId?.toLowerCase().includes(q) ||
           s.email?.toLowerCase().includes(q) ||
-          s.phone?.toLowerCase().includes(q)
+          s.phone?.toLowerCase().includes(q) ||
+          s.familyCode?.toLowerCase().includes(q)
       );
     }
     return list;

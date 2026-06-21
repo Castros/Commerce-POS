@@ -324,6 +324,7 @@ guardianPortalRouter.get(
       `SELECT c.id, c.name, c.active,
               c.avatar_public_id                 AS "avatarPublicId",
               c.home_store_id                    AS "homeStoreId",
+              s.name                             AS "homeStoreName",
               gs.relationship,
               gs.is_primary                      AS "isPrimary",
               COALESCE(w.balance_cents, 0)        AS "balanceCents",
@@ -332,6 +333,8 @@ guardianPortalRouter.get(
        FROM commerce_guardian_students gs
        JOIN commerce_customers c
          ON c.id = gs.student_id
+       LEFT JOIN commerce_stores s
+         ON s.id = c.home_store_id
        LEFT JOIN LATERAL (
          SELECT balance_cents, currency, credit_limit_cents
          FROM commerce_wallet_accounts

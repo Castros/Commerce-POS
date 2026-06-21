@@ -159,6 +159,16 @@ API: http://localhost:4100
 Web: http://localhost:3100
 ```
 
+The web app is also exposed via a Traefik reverse proxy (running on a local edge VM) at:
+
+```text
+https://pos.home.jerrycastro.dev  →  http://192.168.1.30:3100
+```
+
+Traefik is a plain pass-through (no caching). Both URLs hit the same Next.js dev server.
+
+**Browser cache gotcha:** HTTPS sites cache JS bundles more aggressively than direct IP access. If a code change appears on `192.168.1.30:3100` but not on `pos.home.jerrycastro.dev`, the fix is a hard refresh (`Ctrl+Shift+R` / `Cmd+Shift+R`) or clearing site cache on the FQDN — not a code or server issue.
+
 ---
 
 ## Running Locally

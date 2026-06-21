@@ -6243,7 +6243,7 @@ dd {
 
 /* Layout */
 .mpaRoot { display: flex; flex-direction: column; min-height: calc(100vh - 56px); background: var(--mpa-bg); }
-.mpaContent { flex: 1; max-width: 900px; width: 100%; margin: 0 auto; padding: 24px 20px 100px; }
+.mpaContent { flex: 1; max-width: 960px; width: 100%; margin: 0 auto; padding: 24px 20px 100px; }
 
 /* Page header */
 .mpaPageHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
@@ -6370,14 +6370,295 @@ dd {
 .mpaFooter { position: sticky; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 24px; background: rgba(255,255,255,0.95); backdrop-filter: blur(8px); border-top: 1px solid var(--mpa-border); }
 .mpaFooterMsg { font-size: 0.875rem; color: #15803d; font-weight: 500; }
 
+/* Store bar — multi-store split UI */
+.mpaStoreBarDivider { width: 1px; height: 20px; background: var(--mpa-border); margin: 0 4px; flex-shrink: 0; }
+.mpaStoreBtn { display: inline-flex; align-items: center; padding: 4px 12px; border: 1.5px solid var(--mpa-border); border-radius: 999px; background: #fff; cursor: pointer; font-size: 0.82rem; font-weight: 500; color: var(--mpa-muted); transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.mpaStoreBtn:hover { border-color: var(--mpa-primary); color: var(--mpa-primary); }
+.mpaStoreBtn--active { border-color: var(--mpa-primary); background: var(--mpa-primary); color: #fff; font-weight: 600; }
+
+/* Coverage tab */
+/* ── Coverage section (inline, always visible) ─────────────────────────── */
+.mpaCoverageSection { background: #fff; border: 1px solid var(--mpa-border); border-radius: 12px; padding: 14px 16px; }
+.mpaCoverageSectionHeader { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+.mpaCoverageLegend { display: flex; gap: 12px; flex-wrap: wrap; }
+.mpaCoverageLegendItem { display: flex; align-items: center; gap: 4px; font-size: 0.75rem; color: var(--mpa-muted); }
+.mpaCovDot { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+.mpaCovDot--published { background: var(--mpa-primary); }
+.mpaCovDot--draft { border: 1.5px solid var(--mpa-primary); }
+.mpaCovDot--empty { border: 1.5px dashed var(--mpa-border); }
+.mpaCovPill { display: block; text-align: center; padding: 3px 6px; border-radius: 3px; font-size: 0.75rem; width: 100%; font-family: inherit; cursor: pointer; transition: opacity 0.12s; }
+.mpaCovPill--published { background: var(--mpa-primary); color: #fff; border: none; }
+.mpaCovPill--draft { border: 1.5px solid var(--mpa-primary); color: var(--mpa-primary); background: none; }
+.mpaCovPill--empty { border: 1.5px dashed var(--mpa-border); color: var(--mpa-muted); background: none; }
+.mpaCovPill:hover { opacity: 0.75; }
+
+/* ── Cafeteria tab bar ───────────────────────────────────────────────────── */
+.mpaCafeTabs { display: flex; gap: 0; border-bottom: 1px solid var(--mpa-border); overflow-x: auto; scrollbar-width: none; }
+.mpaCafeTabs::-webkit-scrollbar { display: none; }
+.mpaCafeTab { padding: 8px 16px; border: none; background: none; cursor: pointer; font-size: 0.875rem; font-family: inherit; color: var(--mpa-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
+.mpaCafeTab:hover { color: var(--mpa-text); }
+.mpaCafeTab--active { color: var(--mpa-primary); border-bottom-color: var(--mpa-primary); font-weight: 600; }
+
+/* ── Action row (Manual / AI / Copy) ────────────────────────────────────── */
+.mpaActionRow { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mpaActionLeft { display: flex; gap: 8px; }
+.mpaModeBtn { padding: 5px 14px; border: 1.5px solid var(--mpa-border); border-radius: 999px; background: #fff; cursor: pointer; font-size: 0.82rem; font-weight: 500; font-family: inherit; color: var(--mpa-muted); transition: all 0.15s; display: flex; align-items: center; gap: 4px; }
+.mpaModeBtn--active { border-color: var(--mpa-primary); color: var(--mpa-primary); font-weight: 600; }
+.mpaModeBtn:not(.mpaModeBtn--active):hover { border-color: var(--mpa-muted); color: var(--mpa-text); }
+.mpaCopyBtn { display: flex; align-items: center; gap: 6px; padding: 5px 14px; border: 1.5px solid var(--mpa-primary); border-radius: 999px; background: none; cursor: pointer; font-size: 0.82rem; font-family: inherit; color: var(--mpa-primary); font-weight: 500; transition: background 0.15s; }
+.mpaCopyBtn:hover { background: var(--mpa-primary-soft); }
+.mpaCopyBtn .material-symbols-outlined { font-size: 16px; }
+.mpaSaveToBadge { display: inline-flex; align-items: center; justify-content: center; background: var(--mpa-primary); color: #fff; font-size: 0.68rem; font-weight: 700; border-radius: 999px; min-width: 18px; height: 18px; padding: 0 5px; }
+.mpaCopyPopup { position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; background: #fff; border: 1px solid var(--mpa-border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 200px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ── Coverage block (coverage + cafe tabs grouped) ───────────────────────── */
+.mpaCoverageBlock { background: #fff; border: 1px solid var(--mpa-border); border-radius: 12px; overflow: hidden; margin-bottom: 2rem; }
+.mpaCoverageBlock .mpaCoverageSection { border: none; border-radius: 0; padding-bottom: 4px; }
+.mpaCoverageBlock .mpaCafeTabs { border-top: 1px solid var(--mpa-border); border-bottom: none; padding: 0 8px; }
+.mpaCoverageBlock .mpaCafeTab { margin-bottom: 0; border-bottom-width: 3px; }
+
+/* ── Week Grid (5-column day cards) ─────────────────────────────────────── */
+.mpaWeekGridWrap { margin-top: 2rem;}
+.mpaWeekGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+
+.mpaDayCol { display: flex; flex-direction: column; gap: 8px; background: #fff; border: 1px solid var(--mpa-border); border-radius: 8px; padding: 10px; position: relative; }
+.mpaDayCol--today { border: 2px solid var(--mpa-primary); box-shadow: 0 1px 6px rgba(0,92,85,0.1); }
+.mpaDayCol--saved { border-color: #16a34a; box-shadow: 0 0 0 2px #bbf7d0; }
+.mpaDayColBadge { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: var(--mpa-primary); color: #fff; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.mpaDayColHeader { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--mpa-border); padding-bottom: 8px; }
+.mpaDayColDate { font-size: 0.875rem; font-weight: 500; color: var(--mpa-text); }
+.mpaDayCol--today .mpaDayColDate { color: var(--mpa-primary); font-weight: 700; }
+
+.mpaPeriodSection { display: flex; flex-direction: column; gap: 4px; }
+.mpaPeriodSectionLabel { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mpa-muted); display: flex; align-items: center; justify-content: space-between; }
+.mpaPeriodSectionRemove { display: flex; align-items: center; background: none; border: none; cursor: pointer; color: #d1d5db; padding: 0; border-radius: 4px; line-height: 1; transition: color 0.15s; }
+.mpaPeriodSectionRemove:hover { color: #ef4444; }
+.mpaPeriodSectionRemove .material-symbols-outlined { font-size: 12px; }
+
+.mpaItemRow { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--mpa-bg); border: 1px solid var(--mpa-border); border-radius: 4px; min-height: 30px; }
+.mpaItemName { font-size: 0.78rem; color: var(--mpa-text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mpaItemPrice { font-size: 0.78rem; font-weight: 500; color: var(--mpa-muted); white-space: nowrap; flex-shrink: 0; }
+.mpaItemRemove { display: flex; align-items: center; background: none; border: none; cursor: pointer; color: #d1d5db; padding: 0; flex-shrink: 0; transition: color 0.15s; line-height: 1; }
+.mpaItemRemove:hover { color: #ef4444; }
+.mpaItemRemove .material-symbols-outlined { font-size: 13px; }
+
+.mpaAddDashed { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 4px 8px; border: 1.5px dashed var(--mpa-primary); border-radius: 4px; background: none; cursor: pointer; font-size: 0.78rem; font-family: inherit; color: var(--mpa-primary); transition: background 0.12s; }
+.mpaAddDashed:hover { background: var(--mpa-primary-soft); }
+.mpaAddDashed .material-symbols-outlined { font-size: 14px; }
+
+.mpaEmptyDay { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; flex: 1; padding: 16px 0; }
+.mpaEmptyDay .material-symbols-outlined { font-size: 28px; color: var(--mpa-border); }
+.mpaEmptyDayText { font-size: 0.78rem; color: var(--mpa-muted); text-align: center; }
+
+.mpaAddPeriodBtnGrid { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; padding: 4px; border: 1.5px dashed var(--mpa-border); border-radius: 4px; background: none; cursor: pointer; font-size: 0.72rem; font-family: inherit; color: var(--mpa-muted); transition: all 0.15s; margin-top: auto; }
+.mpaAddPeriodBtnGrid:hover { border-color: var(--mpa-primary); color: var(--mpa-primary); }
+.mpaAddPeriodBtnGrid .material-symbols-outlined { font-size: 13px; }
+
+/* Inline remove-period confirmation */
+.mpaRemoveConfirm { display: flex; align-items: center; gap: 6px; }
+.mpaRemoveConfirmLabel { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #dc2626; flex: 1; }
+.mpaRemoveConfirmYes { border: none; background: #dc2626; color: #fff; cursor: pointer; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 3px; font-family: inherit; transition: opacity 0.12s; }
+.mpaRemoveConfirmYes:hover { opacity: 0.85; }
+.mpaRemoveConfirmNo { border: none; background: none; color: var(--mpa-muted); cursor: pointer; font-size: 0.65rem; padding: 1px 4px; font-family: inherit; text-decoration: underline; }
+
 /* Responsive */
 @media (max-width: 600px) {
   .mpaContent { padding: 16px 12px 100px; }
-  .mpaDayDate { width: 60px; min-width: 60px; padding: 12px 6px; }
-  .mpaDayDateShort { font-size: 0.65rem; }
-  .mpaDayDateWeekday { font-size: 0.62rem; }
-  .mpaPeriodLabel { min-width: 70px; max-width: 70px; }
-  .mpaPeriodRight { min-width: 64px; }
   .mpaFooter { padding: 10px 16px; }
 }
 .parentMenuItem span:last-child { color: var(--muted, #6b7280); white-space: nowrap; }
+
+/* ── Parent Portal v2 (pp*) — mobile-first, matches Stitch design ─────── */
+:root {
+  --pp-primary: #00433d;
+  --pp-primary-container: #005c55;
+  --pp-bg: #f8f9fa;
+  --pp-surface: #ffffff;
+  --pp-border: #e5e7eb;
+  --pp-surface-container: #edeeef;
+  --pp-text: #191c1d;
+  --pp-muted: #6b7280;
+  --pp-on-surface-variant: #3f4947;
+  --pp-secondary-container: #dce2f3;
+}
+
+/* Root */
+.ppRoot { max-width: 480px; margin: 0 auto; min-height: 100dvh; background: var(--pp-bg); position: relative; display: flex; flex-direction: column; font-family: Inter, system-ui, sans-serif; }
+
+/* Header */
+.ppHeader { position: sticky; top: 0; z-index: 40; background: #fff; border-bottom: 1px solid var(--pp-border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; height: 56px; }
+.ppHeaderBrand { display: flex; align-items: center; gap: 10px; }
+.ppHeaderAvatar { width: 32px; height: 32px; border-radius: 50%; background: var(--pp-primary-container); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; flex-shrink: 0; }
+.ppHeaderOrg { font-size: 0.95rem; font-weight: 700; color: var(--pp-primary); line-height: 1.2; }
+.ppHeaderNotif { width: 40px; height: 40px; border-radius: 50%; background: none; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--pp-on-surface-variant); transition: background 0.15s; }
+.ppHeaderNotif:hover { background: var(--pp-surface-container); }
+.ppHeaderNotif .material-symbols-outlined { font-size: 22px; }
+
+/* Main scroll area */
+.ppMain { flex: 1; padding: 16px; padding-bottom: 88px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+
+/* Wallet card */
+.ppWalletCard { background: var(--pp-primary-container); border-radius: 16px; padding: 18px 16px; display: flex; align-items: center; justify-content: space-between; position: relative; overflow: hidden; box-shadow: 0 4px 12px rgba(0,67,61,0.25); }
+.ppWalletGlow { position: absolute; right: -20px; top: -20px; width: 100px; height: 100px; border-radius: 50%; background: rgba(255,255,255,0.12); filter: blur(20px); pointer-events: none; }
+.ppWalletLeft { z-index: 1; display: flex; flex-direction: column; gap: 4px; }
+.ppWalletLabel { font-size: 0.68rem; font-weight: 600; color: rgba(255,255,255,0.8); text-transform: uppercase; letter-spacing: 0.07em; margin: 0; }
+.ppWalletAmount { font-size: 2rem; font-weight: 700; color: #fff; margin: 0; line-height: 1.1; }
+.ppWalletAmount--warn { color: #fde68a; }
+.ppWalletAmount--low { color: #fca5a5; }
+.ppWalletStudent { display: flex; align-items: center; gap: 5px; color: rgba(255,255,255,0.85); font-size: 0.8rem; }
+.ppWalletStudent .material-symbols-outlined { font-size: 15px; }
+.ppWalletRecharge { z-index: 1; background: #fff; color: var(--pp-primary); border: none; border-radius: 10px; padding: 9px 18px; font-size: 0.82rem; font-weight: 700; cursor: pointer; font-family: inherit; transition: opacity 0.15s; white-space: nowrap; flex-shrink: 0; }
+.ppWalletRecharge:disabled { opacity: 0.55; cursor: default; }
+
+/* Sections */
+.ppSection { display: flex; flex-direction: column; gap: 8px; }
+.ppSectionHead { display: flex; align-items: center; gap: 8px; }
+.ppSectionTitle { font-size: 0.95rem; font-weight: 700; color: var(--pp-primary); margin: 0; }
+.ppTabNote { font-size: 0.78rem; color: var(--pp-muted); margin: 0; }
+.ppGroupDate { font-size: 0.7rem; font-weight: 700; color: var(--pp-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0; }
+
+/* Week nav (menu tab) */
+.ppWeekNav { display: flex; gap: 4px; margin-left: auto; }
+.ppWeekNav button { background: none; border: 1px solid var(--pp-border); border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 0.82rem; color: var(--pp-muted); font-family: inherit; transition: background 0.1s; }
+.ppWeekNav button:hover { background: var(--pp-surface-container); }
+
+/* Menu card */
+.ppMenuCard { background: #fff; border: 1px solid var(--pp-border); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.ppDayPills { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--pp-border); }
+.ppDayPill { flex: 1; padding: 6px 0; border-radius: 8px; border: 1px solid var(--pp-border); background: none; cursor: pointer; font-size: 0.7rem; font-weight: 600; color: var(--pp-on-surface-variant); font-family: inherit; transition: all 0.12s; text-align: center; }
+.ppDayPill--active { background: var(--pp-primary-container); color: #fff; border-color: var(--pp-primary-container); }
+.ppDayPill:not(.ppDayPill--active):hover { background: var(--pp-surface-container); }
+.ppMenuDayContent { padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; }
+.ppMenuDayFull { font-size: 0.82rem; font-weight: 600; color: var(--pp-text); margin: 0 0 8px; text-transform: capitalize; }
+.ppMenuDivider { height: 1px; background: var(--pp-border); margin: 6px 0; }
+.ppMenuEmpty { font-size: 0.8rem; color: var(--pp-muted); text-align: center; padding: 12px 0 4px; font-style: italic; margin: 0; }
+.ppAccordionBtn { width: 100%; display: flex; align-items: center; justify-content: space-between; background: none; border: none; cursor: pointer; padding: 5px 0; font-family: inherit; }
+.ppAccordionLabel { font-size: 0.875rem; font-weight: 600; color: var(--pp-primary); }
+.ppAccordionChevron { font-size: 18px; color: var(--pp-on-surface-variant); }
+.ppItemChips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 8px; }
+.ppItemChip { padding: 4px 10px; border: 1.5px solid var(--pp-primary); color: var(--pp-primary); border-radius: 8px; font-size: 0.72rem; font-weight: 500; background: #fff; }
+
+/* Purchases / transactions */
+.ppPurchasesCard { background: #fff; border: 1px solid var(--pp-border); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.ppPurchasesDivider { height: 1px; background: var(--pp-surface-container); }
+.ppTxItem { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.ppTxIcon { width: 40px; height: 40px; border-radius: 50%; background: var(--pp-secondary-container); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ppTxIcon .material-symbols-outlined { font-size: 18px; color: var(--pp-on-surface-variant); }
+.ppTxInfo { flex: 1; min-width: 0; }
+.ppTxName { font-size: 0.875rem; font-weight: 500; color: var(--pp-text); margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ppTxMeta { font-size: 0.7rem; color: var(--pp-muted); margin: 2px 0 0; }
+.ppTxAmount { font-size: 0.875rem; font-weight: 600; color: var(--pp-on-surface-variant); white-space: nowrap; flex-shrink: 0; }
+
+/* See-all link button */
+.ppSeeAll { background: none; border: none; cursor: pointer; font-family: inherit; font-size: 0.8rem; font-weight: 600; color: var(--pp-primary); padding: 4px 0; text-align: center; width: 100%; transition: opacity 0.12s; }
+.ppSeeAll:hover { opacity: 0.7; }
+
+/* Settings */
+.ppSettingsCard { background: #fff; border: 1px solid var(--pp-border); border-radius: 14px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.ppSettingsRow { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
+.ppSettingsRow--profile { gap: 14px; }
+.ppSettingsAvatar { width: 44px; height: 44px; border-radius: 50%; background: var(--pp-primary-container); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 700; flex-shrink: 0; }
+.ppSettingsName { font-size: 0.9rem; font-weight: 600; color: var(--pp-text); margin: 0 0 2px; }
+.ppSettingsEmail { font-size: 0.75rem; color: var(--pp-muted); margin: 0; }
+.ppSettingsRowIcon { width: 36px; height: 36px; border-radius: 50%; background: var(--pp-surface-container); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ppSettingsRowIcon .material-symbols-outlined { font-size: 18px; color: var(--pp-primary); }
+.ppSettingsRowInfo { flex: 1; }
+.ppSettingsRowLabel { font-size: 0.875rem; font-weight: 500; color: var(--pp-text); margin: 0; }
+.ppSettingsRowSub { font-size: 0.7rem; color: var(--pp-muted); margin: 2px 0 0; }
+
+/* Student thumb (settings) */
+.ppStudentThumb { width: 28px; height: 28px; border-radius: 50%; background: var(--pp-surface-container); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ppStudentThumb .material-symbols-outlined { font-size: 16px; color: var(--pp-muted); }
+
+/* Toggle switch */
+.ppToggle { position: relative; width: 44px; height: 24px; border-radius: 999px; background: var(--pp-border); border: none; cursor: pointer; padding: 0; transition: background 0.2s; flex-shrink: 0; }
+.ppToggle--on { background: var(--pp-primary-container); }
+.ppToggle:disabled { opacity: 0.5; cursor: not-allowed; }
+.ppToggleKnob { position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.2s; display: block; }
+.ppToggle--on .ppToggleKnob { transform: translateX(20px); }
+
+/* Spending controls (in settings) */
+.ppControlsToggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: #fff; border: 1px solid var(--pp-border); border-radius: 14px; cursor: pointer; font-family: inherit; font-size: 0.875rem; font-weight: 500; color: var(--pp-text); transition: background 0.1s; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.ppControlsToggle--open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
+.ppControlsToggle:hover { background: var(--pp-surface-container); }
+.ppControlsToggleLeft { display: flex; align-items: center; gap: 8px; }
+.ppControlsBadge { background: var(--pp-primary-container); color: #fff; border-radius: 999px; font-size: 0.65rem; font-weight: 700; padding: 1px 7px; }
+.ppControlsBody { background: #fff; border: 1px solid var(--pp-border); border-top: none; border-radius: 0 0 14px 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.ppControlsRow { display: flex; align-items: center; gap: 12px; }
+.ppControlsRowInfo { flex: 1; }
+.ppControlsRowLabel { font-size: 0.875rem; font-weight: 500; color: var(--pp-text); margin: 0; }
+.ppControlsRowSub { font-size: 0.7rem; color: var(--pp-muted); margin: 2px 0 0; }
+.ppAmountInput { display: flex; align-items: center; gap: 8px; background: var(--pp-surface-container); border: 1px solid var(--pp-border); border-radius: 8px; padding: 8px 12px; font-size: 0.875rem; color: var(--pp-text); }
+.ppAmountInput span { color: var(--pp-muted); white-space: nowrap; }
+.ppAmountInput input { flex: 1; border: none; background: transparent; font-size: 0.875rem; font-family: inherit; color: var(--pp-text); min-width: 0; outline: none; text-align: right; }
+.ppCategoryChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ppCategoryChip { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid var(--pp-border); border-radius: 8px; background: #fff; cursor: pointer; font-size: 0.72rem; font-weight: 500; color: var(--pp-on-surface-variant); font-family: inherit; transition: all 0.12s; }
+.ppCategoryChip--blocked { border-color: #ef4444; color: #dc2626; background: #fef2f2; }
+.ppCategoryChip .material-symbols-outlined { font-size: 13px; }
+.ppSaveBtn { width: 100%; padding: 10px; background: var(--pp-primary-container); color: #fff; border: none; border-radius: 10px; font-size: 0.875rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: opacity 0.15s; }
+.ppSaveBtn:disabled { opacity: 0.55; cursor: default; }
+.ppSaveBtn:not(:disabled):hover { opacity: 0.88; }
+
+/* Logout */
+.ppLogoutBtn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 13px; background: #fff; border: 1px solid #fca5a5; border-radius: 14px; cursor: pointer; font-family: inherit; font-size: 0.875rem; font-weight: 600; color: #dc2626; transition: background 0.15s; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.ppLogoutBtn:hover { background: #fef2f2; }
+.ppLogoutBtn .material-symbols-outlined { font-size: 18px; }
+
+/* Bottom nav */
+.ppBottomNav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 480px; height: 64px; background: #fff; border-top: 1px solid var(--pp-border); display: flex; align-items: center; justify-content: space-around; padding: 0 8px; z-index: 50; }
+.ppNavItem { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 14px; border: none; background: none; cursor: pointer; border-radius: 12px; transition: background 0.12s, transform 0.1s; color: var(--pp-on-surface-variant); font-family: inherit; }
+.ppNavItem--active { background: #e0f0ee; color: var(--pp-primary-container); }
+.ppNavItem:active { transform: scale(0.94); }
+.ppNavItem .material-symbols-outlined { font-size: 22px; }
+.ppNavLabel { font-size: 0.62rem; font-weight: 600; }
+
+/* Empty / loading state */
+.ppEmptyState { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 60px 20px; color: var(--pp-muted); font-size: 0.875rem; text-align: center; }
+.ppEmptyState .material-symbols-outlined { font-size: 40px; opacity: 0.35; }
+
+/* Student card (home tab) */
+.ppStudentCard { background: #fff; border: 1px solid var(--pp-border); border-radius: 16px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.06); display: flex; flex-direction: column; }
+.ppStudentCard--low { border-color: #fbbf24; }
+.ppStudentCardAlert { background: #fffbeb; border-bottom: 1px solid #fde68a; padding: 8px 14px; display: flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: #92400e; }
+.ppStudentCardAlert .material-symbols-outlined { font-size: 16px; color: #f59e0b; }
+.ppStudentCardMain { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; }
+.ppStudentCardLeft { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.ppStudentCardAvatar { width: 48px; height: 48px; border-radius: 50%; background: var(--pp-primary-container); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1rem; font-weight: 700; flex-shrink: 0; }
+.ppStudentCardName { font-size: 0.95rem; font-weight: 700; color: var(--pp-text); margin: 0; }
+.ppStudentCardCampus { font-size: 0.7rem; color: var(--pp-muted); display: flex; align-items: center; gap: 2px; margin: 2px 0 0; }
+.ppStudentCardBalance { text-align: right; flex-shrink: 0; }
+.ppStudentCardAmount { font-size: 1.5rem; font-weight: 700; color: var(--pp-primary); margin: 0; line-height: 1.1; }
+.ppStudentCardAmount--warn { color: #d97706; }
+.ppStudentCardAmount--low { color: #dc2626; }
+.ppStudentCardBalanceLabel { font-size: 0.62rem; color: var(--pp-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0; }
+.ppStudentCardActivity { display: flex; align-items: center; gap: 6px; padding: 8px 16px; background: var(--pp-bg); border: none; border-top: 1px solid var(--pp-border); cursor: pointer; font-family: inherit; font-size: 0.78rem; color: var(--pp-text); text-align: left; width: 100%; transition: background 0.1s; }
+.ppStudentCardActivity:hover { background: var(--pp-surface-container); }
+.ppStudentCardRecharge { margin: 10px 16px 14px; width: calc(100% - 32px); padding: 9px; background: var(--pp-primary-container); color: #fff; border-radius: 10px; font-size: 0.82rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; }
+.ppStudentCardRecharge:disabled { opacity: 0.55; cursor: default; }
+
+/* Today's menu card on home */
+.ppTodayMenuCard { background: #fff; border: 1px solid var(--pp-border); border-radius: 14px; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+.ppTodayMenuStudent { font-size: 0.72rem; font-weight: 700; color: var(--pp-primary); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px; }
+.ppTodayMenuChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ppTodayMenuEmpty { font-size: 0.78rem; color: var(--pp-muted); font-style: italic; }
+.ppItemChip--sm { font-size: 0.68rem; padding: 3px 8px; }
+
+/* Student picker (menu tab) */
+.ppStudentPicker { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.ppStudentPickerCard { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 12px; background: #fff; border: 1px solid var(--pp-border); border-radius: 14px; cursor: pointer; font-family: inherit; box-shadow: 0 1px 4px rgba(0,0,0,0.05); transition: all 0.12s; }
+.ppStudentPickerCard:hover { border-color: var(--pp-primary-container); box-shadow: 0 2px 8px rgba(0,92,85,0.12); }
+.ppStudentPickerAvatar { width: 40px; height: 40px; border-radius: 50%; background: var(--pp-primary-container); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: 700; }
+.ppStudentPickerName { font-size: 0.875rem; font-weight: 700; color: var(--pp-text); margin: 0; text-align: center; }
+.ppStudentPickerCampus { font-size: 0.65rem; color: var(--pp-muted); margin: 0; text-align: center; }
+
+/* Back button */
+.ppBackBtn { display: flex; align-items: center; background: var(--pp-surface-container); border: none; border-radius: 8px; padding: 6px; cursor: pointer; color: var(--pp-on-surface-variant); flex-shrink: 0; }
+.ppBackBtn .material-symbols-outlined { font-size: 20px; }
+
+/* Small screen tweaks */
+@media (max-width: 400px) {
+  .ppDayPills { gap: 4px; padding: 8px; }
+  .ppDayPill { font-size: 0.65rem; }
+  .ppNavItem { padding: 6px 10px; }
+  .ppStudentCardAmount { font-size: 1.25rem; }
+}

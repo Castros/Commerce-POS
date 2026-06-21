@@ -22,10 +22,11 @@ async function readApiPayload<T>(response: Response): Promise<ApiEnvelope<T>> {
   return payload as ApiEnvelope<T>;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, options?: { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
     cache: "no-store",
-    credentials: "include"
+    credentials: "include",
+    signal: options?.signal,
   });
   const payload = await readApiPayload<T>(response);
   return (payload as ApiEnvelope<T>).data;

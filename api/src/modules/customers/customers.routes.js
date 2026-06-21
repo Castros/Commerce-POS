@@ -222,17 +222,19 @@ customersRouter.patch(
     const sets = [];
     const vals = [body.organizationId, customerId];
 
+    // Always fetch current record — needed for name merging and family_code diff
+    const currentRecord = await pool.query(
+      `SELECT first_name, middle_name, last_name_1, last_name_2, name, family_code, customer_type FROM commerce_customers WHERE id = $1 AND organization_id = $2`,
+      [customerId, body.organizationId]
+    );
+    if (currentRecord.rowCount === 0) throw notFound("Customer not found");
+    const oldFamilyCode = currentRecord.rows[0].family_code;
+
     // If any name part is provided, recompute the full name
     const hasNameParts = body.firstName !== undefined || body.middleName !== undefined ||
                          body.lastName1 !== undefined || body.lastName2 !== undefined;
     if (hasNameParts || body.name !== undefined) {
-      // We need the current record to merge unchanged parts
-      const current = await pool.query(
-        `SELECT first_name, middle_name, last_name_1, last_name_2, name FROM commerce_customers WHERE id = $1 AND organization_id = $2`,
-        [customerId, body.organizationId]
-      );
-      if (current.rowCount === 0) throw notFound("Customer not found");
-      const cur = current.rows[0];
+      const cur = currentRecord.rows[0];
       const fn = body.firstName  !== undefined ? body.firstName  : cur.first_name;
       const mn = body.middleName !== undefined ? body.middleName : cur.middle_name;
       const l1 = body.lastName1  !== undefined ? body.lastName1  : cur.last_name_1;
@@ -271,20 +273,38 @@ customersRouter.patch(
     );
     if (result.rowCount === 0) throw notFound("Customer not found");
 
-    // Auto-link any guardians that share the new family_code
+    // Sync guardian-student links when family_code changes on a student
     const customer = result.rows[0];
-    if (body.familyCode && customer.customerType === "student") {
-      await pool.query(
-        `INSERT INTO commerce_guardian_students
-           (guardian_id, student_id, organization_id, relationship)
-         SELECT g.id, $1, $2, 'guardian'
-         FROM commerce_guardians g
-         WHERE g.organization_id = $2
-           AND g.family_code     = $3
-           AND g.active          = TRUE
-         ON CONFLICT (guardian_id, student_id) DO NOTHING`,
-        [customerId, body.organizationId, body.familyCode]
-      );
+    if (body.familyCode !== undefined && customer.customerType === "student") {
+      const newFamilyCode = body.familyCode;
+
+      // Remove links created by the old family code (if it changed or was cleared)
+      if (oldFamilyCode && oldFamilyCode !== newFamilyCode) {
+        await pool.query(
+          `DELETE FROM commerce_guardian_students
+           WHERE student_id = $1
+             AND guardian_id IN (
+               SELECT id FROM commerce_guardians
+               WHERE organization_id = $2 AND family_code = $3
+             )`,
+          [customerId, body.organizationId, oldFamilyCode]
+        );
+      }
+
+      // Add links for the new family code
+      if (newFamilyCode) {
+        await pool.query(
+          `INSERT INTO commerce_guardian_students
+             (guardian_id, student_id, organization_id, relationship)
+           SELECT g.id, $1, $2, 'guardian'
+           FROM commerce_guardians g
+           WHERE g.organization_id = $2
+             AND g.family_code     = $3
+             AND g.active          = TRUE
+           ON CONFLICT (guardian_id, student_id) DO NOTHING`,
+          [customerId, body.organizationId, newFamilyCode]
+        );
+      }
     }
 
     res.json({ data: customer });
