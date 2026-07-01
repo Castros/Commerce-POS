@@ -11,12 +11,9 @@ const allowedDevOrigins = [
 
 const nextConfig: NextConfig = {
   allowedDevOrigins,
-  turbopack: {
-    root: process.cwd()
-  },
   experimental: {
-    turbopackMemoryLimit: 1_500_000_000, // 1.5 GB — prevents heap OOM under rapid hot-reload
-    turbopackFileSystemCacheForDev: true, // persist module cache to disk so heap can be freed
+    turbopackMemoryLimit: 512_000_000,       // 512 MB — aggressively evict to disk cache
+    turbopackFileSystemCacheForDev: true,    // persist evicted modules to disk
   },
   images: {
     remotePatterns: [

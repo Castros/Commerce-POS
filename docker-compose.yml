@@ -51,12 +51,12 @@ services:
     build:
       context: ./web
     command: npm run dev -- -H 0.0.0.0
-    restart: always
+    restart: on-failure
     environment:
       API_URL: http://api:4100
       PORT: ${WEB_PORT:-3100}
       NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
-      NODE_OPTIONS: "--max-old-space-size=3072"
+      NODE_OPTIONS: "--max-old-space-size=8192"
     ports:
       - "${WEB_PORT:-3100}:3100"
     volumes:

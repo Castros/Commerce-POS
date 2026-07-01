@@ -353,14 +353,19 @@ inventoryRouter.post(
     if (rawRows.length === 0) throw badRequest("CSV has no data rows");
     if (rawRows.length > 500) throw badRequest("Max 500 rows per import");
 
-    // Load all active products for this org (keyed by SKU)
+    // Load all active products for this org (keyed by SKU and by name for fallback)
     const productsResult = await pool.query(
       `SELECT id, name, sku FROM commerce_products
-       WHERE organization_id = $1 AND active = TRUE AND sku IS NOT NULL`,
+       WHERE organization_id = $1 AND active = TRUE`,
       [organizationId]
     );
     const productBySku = new Map(
-      productsResult.rows.map((p) => [p.sku.toLowerCase().trim(), p])
+      productsResult.rows
+        .filter((p) => p.sku)
+        .map((p) => [p.sku.toLowerCase().trim(), p])
+    );
+    const productByName = new Map(
+      productsResult.rows.map((p) => [p.name.toLowerCase().trim(), p])
     );
 
     // Load all stores for this org (keyed by name, case-insensitive)
@@ -421,7 +426,7 @@ inventoryRouter.post(
         reorderThreshold,
         productFound,
         storeFound,
-        action: productFound ? "set" : "skip",
+        status: productFound ? "set" : "skip",
       });
     }
 
